@@ -10,6 +10,9 @@ services:
     volumes:
       - ./data:/data
     ports:
-      # Bind to localhost only — Cloudflare Tunnel reaches this over the
-      # docker network / localhost, it should never be exposed on your LAN/WAN directly.
-      - "127.0.0.1:8000:8000"
+      # Published on the host, same pattern as this deployment's other
+      # cloudflared-routed services (n8n, portainer, jenkins): reachable via
+      # the docker0 bridge gateway at 172.17.0.1:8000, and also on the LAN.
+      # Access control comes from Cloudflare Access + APP_PASSWORD, not from
+      # network isolation — make sure both are set before exposing this.
+      - "8000:8000"

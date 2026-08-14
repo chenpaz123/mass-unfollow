@@ -32,47 +32,29 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-This starts the app listening on `127.0.0.1:8000` on your server only — it is
-**not** exposed to your LAN or the internet yet. That's what the tunnel is for.
+This publishes the app on port `8000` on the server itself (same pattern this
+deployment already uses for n8n/portainer/jenkins) — reachable at
+`http://<server-lan-ip>:8000` on your home network, and at
+`http://172.17.0.1:8000` from inside any container on the default `bridge`
+network (including `cloudflared`, going by the routes already configured for
+`n8n` and `home`). It is **not** exposed to the internet directly — only
+through the tunnel, once you add the route below — but note it's reachable
+by anything on your LAN as-is, so get `APP_PASSWORD` and Cloudflare Access set
+before leaving it running.
 
-Check it's alive: `curl http://127.0.0.1:8000/api/session` should return
-`{"authenticated":false}`.
+Check it's alive: `curl http://127.0.0.1:8000/api/session` (run on the
+server) should return `{"authenticated":false}`.
 
-## 2. Expose it through your existing Cloudflare Tunnel
+## 2. Add the route in Cloudflare
 
-You said you already have `cloudflared` running with Zero Trust and your own
-domain — you just need to add one more hostname to it.
+In Zero Trust → Networks → Tunnels → your tunnel → **Published application
+routes** (the screen you already have open):
 
-**If you manage the tunnel via the Cloudflare dashboard (Zero Trust →
-Networks → Tunnels):**
-1. Open your tunnel → **Public Hostname** → **Add a public hostname**.
-2. Subdomain: something like `unfollow` (→ `unfollow.yourdomain.com`).
-3. Service: **Type** `HTTP`, **URL** `localhost:8000` (or the container's
-   internal address if `cloudflared` itself runs in Docker on the same
-   network — see note below).
-4. Save. Cloudflare updates the tunnel config automatically, no restart
-   needed.
-
-**If you manage it via a local `config.yml`**, add an ingress rule *above*
-the catch-all `service: http_status:404` line:
-
-```yaml
-ingress:
-  - hostname: unfollow.yourdomain.com
-    service: http://localhost:8000
-  - service: http_status:404
-```
-
-Then `cloudflared tunnel run` (or restart the `cloudflared` service).
-
-**If `cloudflared` runs in its own Docker container**, `localhost:8000` won't
-reach this app from inside that container. Easiest fix: put both containers
-on the same Docker network and point cloudflared at
-`http://mass-unfollow:8000` instead — e.g. add `cloudflared` to this repo's
-`docker-compose.yml` under the same top-level network, or add
-`external: true` networking so your existing cloudflared compose file can
-join `mass-unfollow`'s network. Tell me how your cloudflared container is set
-up (its compose file / network name) and I'll wire the exact config.
+1. **+ Add a published application route**.
+2. Domain: `unfollow.chenpaz.cc` (or whatever subdomain you want).
+3. Service: **Type** `HTTP`, **URL** `172.17.0.1:8000` — same pattern as your
+   `n8n.chenpaz.cc` and `home.chenpaz.cc` routes.
+4. Save. No restart needed, cloudflared picks it up automatically.
 
 ## 3. Lock it down with Cloudflare Access
 
@@ -80,7 +62,7 @@ Since this holds your Instagram session, gate the hostname with a Zero Trust
 Access policy so only you can reach it:
 
 1. Zero Trust → **Access → Applications → Add an application** → **Self-hosted**.
-2. Domain: `unfollow.yourdomain.com`.
+2. Domain: `unfollow.chenpaz.cc`.
 3. Add a policy: **Include** → **Emails** → your email address only.
 4. Save. Now visiting the URL requires a Cloudflare login (email OTP or
    whatever identity provider you have configured) *before* it ever reaches
@@ -89,7 +71,7 @@ Access policy so only you can reach it:
 
 ## 4. First run
 
-1. Visit `https://unfollow.yourdomain.com`, enter your `APP_PASSWORD`.
+1. Visit `https://unfollow.chenpaz.cc`, enter your `APP_PASSWORD`.
 2. **Connect Instagram** — two options:
    - **Session ID** (recommended, no 2FA hassle): log into Instagram in your
      browser, open DevTools → Application/Storage → Cookies →
