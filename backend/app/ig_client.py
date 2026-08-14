@@ -85,6 +85,29 @@ def _save_session(cl: Client):
     cl.dump_settings(str(config.IG_SESSION_PATH))
 
 
+def _adopt_authenticated_client(cl: Client):
+    """Register cl as the live, authenticated client and persist its session."""
+    global _client
+    with _client_lock:
+        _client = cl
+    _save_session(cl)
+    with auth_state.lock:
+        auth_state.status = "authenticated"
+        auth_state._pending_username = ""
+        auth_state._pending_password = ""
+
+
+def _is_soft_login_flow_failure(cl: Client) -> bool:
+    """True if cl actually authenticated (has a user_id) despite login() raising.
+
+    instagrapi's login_flow() makes extra "look like a real mobile app" warm-up
+    calls (reels tray, timeline feed) *after* the real login already succeeded.
+    Instagram frequently rejects those calls on new devices/IPs, which makes
+    login() raise even though the account is fully authenticated at that point.
+    """
+    return bool(getattr(cl, "user_id", None))
+
+
 def login_with_sessionid(sessionid: str):
     global _client
     cl = _new_client()
@@ -133,16 +156,16 @@ def login_with_password(username: str, password: str):
             auth_state.error = "Incorrect username or password."
         return
     except Exception as e:
+        if _is_soft_login_flow_failure(cl):
+            log.warning("login_flow() warm-up call failed after real login succeeded: %s", e)
+            _adopt_authenticated_client(cl)
+            return
         with auth_state.lock:
             auth_state.status = "error"
             auth_state.error = f"Login failed: {e}"
         return
 
-    with _client_lock:
-        _client = cl
-    _save_session(cl)
-    with auth_state.lock:
-        auth_state.status = "authenticated"
+    _adopt_authenticated_client(cl)
 
 
 def submit_2fa_code(code: str):
@@ -159,14 +182,12 @@ def submit_2fa_code(code: str):
     cl = _new_client()
     try:
         cl.login(username, password, verification_code=code.strip())
-        with _client_lock:
-            _client = cl
-        _save_session(cl)
-        with auth_state.lock:
-            auth_state.status = "authenticated"
-            auth_state._pending_username = ""
-            auth_state._pending_password = ""
+        _adopt_authenticated_client(cl)
     except Exception as e:
+        if _is_soft_login_flow_failure(cl):
+            log.warning("login_flow() warm-up call failed after 2FA succeeded: %s", e)
+            _adopt_authenticated_client(cl)
+            return
         with auth_state.lock:
             auth_state.status = "error"
             auth_state.error = (
