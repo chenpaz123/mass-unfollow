@@ -1,0 +1,15 @@
+services:
+  mass-unfollow:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: mass-unfollow
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+    ports:
+      # Bind to localhost only — Cloudflare Tunnel reaches this over the
+      # docker network / localhost, it should never be exposed on your LAN/WAN directly.
+      - "127.0.0.1:8000:8000"

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Mass Unfollow</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- App password gate -->
+  <section id="screen-app-login" class="screen hidden">
+    <div class="card-panel">
+      <h1>Mass Unfollow</h1>
+      <p class="muted">Enter the app password to continue.</p>
+      <form id="form-app-login">
+        <input type="password" id="app-password" placeholder="App password" autocomplete="current-password" required />
+        <button type="submit">Unlock</button>
+      </form>
+      <p class="error" id="app-login-error"></p>
+    </div>
+  </section>
+
+  <!-- Instagram login -->
+  <section id="screen-ig-login" class="screen hidden">
+    <div class="card-panel">
+      <h1>Connect Instagram</h1>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="tab-sessionid">Session ID</button>
+        <button class="tab-btn" data-tab="tab-password">Username / Password</button>
+      </div>
+
+      <div id="tab-sessionid" class="tab-content">
+        <p class="muted">Log into Instagram in your browser, open dev tools → Application → Cookies →
+          instagram.com, copy the value of <code>sessionid</code>, and paste it below.</p>
+        <form id="form-sessionid">
+          <input type="text" id="sessionid" placeholder="sessionid cookie value" required />
+          <button type="submit">Connect</button>
+        </form>
+      </div>
+
+      <div id="tab-password" class="tab-content hidden">
+        <form id="form-password">
+          <input type="text" id="ig-username" placeholder="Instagram username" required />
+          <input type="password" id="ig-password" placeholder="Instagram password" required />
+          <button type="submit">Log in</button>
+        </form>
+        <form id="form-2fa" class="hidden">
+          <p class="muted">Enter the 2FA code from your authenticator app / SMS.</p>
+          <input type="text" id="ig-2fa-code" placeholder="6-digit code" required />
+          <button type="submit">Submit code</button>
+        </form>
+      </div>
+
+      <p class="error" id="ig-login-error"></p>
+      <p class="hint">This app talks to Instagram's private API directly (no official public API exists for
+        managing follows). Keep unfollow volume low and steady — see the README for safe limits.</p>
+    </div>
+  </section>
+
+  <!-- Sync -->
+  <section id="screen-sync" class="screen hidden">
+    <div class="card-panel">
+      <h1>Load your following list</h1>
+      <p class="muted" id="sync-summary">Not synced yet.</p>
+      <button id="btn-sync-start">Sync following list</button>
+      <div id="sync-progress" class="hidden">
+        <div class="progress-bar"><div class="progress-fill" id="sync-progress-fill"></div></div>
+        <p class="muted" id="sync-progress-text"></p>
+      </div>
+      <button id="btn-go-swipe" class="secondary hidden">Start swiping →</button>
+    </div>
+  </section>
+
+  <!-- Swipe -->
+  <section id="screen-swipe" class="screen hidden">
+    <header class="swipe-header">
+      <div id="swipe-remaining" class="muted">0 remaining</div>
+      <button id="btn-review" class="link-btn">Review &amp; unfollow →</button>
+    </header>
+
+    <div class="card-stack" id="card-stack">
+      <div class="empty-state hidden" id="swipe-empty">
+        <p>🎉 You've been through everyone.</p>
+        <button id="btn-go-review-2">Go to review</button>
+      </div>
+    </div>
+
+    <div class="swipe-controls">
+      <button id="btn-undo" class="round-btn ghost" title="Undo">↺</button>
+      <button id="btn-remove" class="round-btn danger" title="Unfollow">✕</button>
+      <button id="btn-keep" class="round-btn success" title="Keep">♥</button>
+    </div>
+    <p class="hint">Drag the card, or use the buttons / ← → arrow keys.</p>
+  </section>
+
+  <!-- Review / worker -->
+  <section id="screen-review" class="screen hidden">
+    <div class="card-panel">
+      <h1>Review</h1>
+      <div class="stats-grid" id="stats-grid"></div>
+
+      <button id="btn-back-swipe" class="secondary">← Back to swiping</button>
+
+      <h2>Unfollow queue</h2>
+      <p class="muted">Unfollows run slowly in the background to keep your account safe — a random delay
+        between each one, capped per day.</p>
+
+      <label>Daily cap
+        <input type="number" id="cfg-daily-cap" min="1" max="500" />
+      </label>
+      <label>Delay between unfollows (seconds)
+        <span class="row">
+          <input type="number" id="cfg-min-delay" min="5" />
+          <span>to</span>
+          <input type="number" id="cfg-max-delay" min="5" />
+        </span>
+      </label>
+      <button id="btn-save-worker-config" class="secondary">Save settings</button>
+
+      <div id="worker-status" class="worker-status"></div>
+      <div class="worker-buttons">
+        <button id="btn-worker-start">Start unfollow queue</button>
+        <button id="btn-worker-stop" class="danger hidden">Pause</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+<script src="/app.js"></script>
+</body>
+</html>
