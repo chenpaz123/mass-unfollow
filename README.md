@@ -72,20 +72,21 @@ Access policy so only you can reach it:
 ## 4. First run
 
 1. Visit `https://unfollow.chenpaz.cc`, enter your `APP_PASSWORD`.
-2. **Connect Instagram** — two options:
-   - **Session ID** (recommended, no 2FA hassle): log into Instagram in your
-     browser, open DevTools → Application/Storage → Cookies →
-     `https://www.instagram.com`, copy the `sessionid` value, paste it in.
-     It'll periodically expire (weeks, usually) — just repeat this step when
-     it does.
-   - **Username/password**: supports 2FA via an authenticator app (Google
-     Authenticator, Authy, etc — TOTP codes). If prompted, open the app and
-     enter the current 6-digit code. SMS-delivered codes are not supported by
-     this login path — if your account only has SMS 2FA, either add an
-     authenticator app under Instagram → Settings → Two-factor authentication
-     first, or use the Session ID method above instead. If Instagram throws a
-     security checkpoint (different from 2FA), the app will tell you to clear
-     it by logging in normally via the app/website first, then retry here.
+2. **Connect Instagram** — use **Username / Password** (the default tab):
+   supports 2FA via an authenticator app (Google Authenticator, Authy, etc —
+   TOTP codes). If prompted, open the app and enter the current 6-digit code.
+   SMS-delivered codes are not supported — if your account only has SMS 2FA,
+   add an authenticator app under Instagram → Settings → Two-factor
+   authentication first. If Instagram throws a security checkpoint (different
+   from 2FA), the app will tell you to clear it by logging in normally via
+   the app/website first, then retry here.
+
+   The **Session ID** tab exists but generally doesn't work: a `sessionid`
+   cookie copied from your browser was issued for a *web* login, while this
+   app talks to Instagram's *mobile* private API — Instagram usually rejects
+   browser-issued sessions there (shows up as a "467" error). Stick to
+   Username/Password; the session it creates is saved locally afterward so
+   you won't need to log in again unless it expires.
 3. **Sync following list** — pulls all ~7,300 accounts you follow. Takes a
    few minutes; only needs to be done once (re-run any time to pick up new
    follows).
