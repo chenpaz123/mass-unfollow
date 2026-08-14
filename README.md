@@ -104,3 +104,15 @@ Access policy so only you can reach it:
   `./data/avatars`.
 - If you ever want to start over, stop the container and delete `./data`
   (this forgets your Instagram session and all decisions).
+
+## Troubleshooting: "Expecting value: line 1 column 1 (char 0)" / random 4xx errors
+
+This means Instagram sent back an empty or non-JSON response to a private API
+call — usually because [instagrapi](https://github.com/subzeroid/instagrapi)
+has fallen behind Instagram's current app version and is being treated as an
+outdated/unsupported client. Instagram updates its API fairly often; when it
+does, instagrapi needs a matching release. Fix: bump the pin in
+`backend/requirements.txt` to the latest version from
+[PyPI](https://pypi.org/project/instagrapi/#history), then
+`docker compose up -d --build`. If errors persist after upgrading, it may
+instead be a temporary soft rate-limit — wait a while before retrying.
