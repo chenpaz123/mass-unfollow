@@ -169,7 +169,13 @@ def submit_2fa_code(code: str):
     except Exception as e:
         with auth_state.lock:
             auth_state.status = "error"
-            auth_state.error = f"2FA code rejected: {e}"
+            auth_state.error = (
+                f"2FA code rejected: {e}. Make sure you're entering the current code from an "
+                "authenticator app (Google Authenticator, Authy, etc) — SMS-delivered codes won't "
+                "work here. If the account only has SMS 2FA, enable an authenticator app under "
+                "Instagram → Settings → Two-factor authentication first, or use the Session ID "
+                "login method instead."
+            )
 
 
 def logout():

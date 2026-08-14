@@ -96,9 +96,14 @@ Access policy so only you can reach it:
      `https://www.instagram.com`, copy the `sessionid` value, paste it in.
      It'll periodically expire (weeks, usually) — just repeat this step when
      it does.
-   - **Username/password**: supports 2FA codes. If Instagram throws a
-     security checkpoint, the app will tell you to clear it by logging in
-     normally via the app/website first, then retry here.
+   - **Username/password**: supports 2FA via an authenticator app (Google
+     Authenticator, Authy, etc — TOTP codes). If prompted, open the app and
+     enter the current 6-digit code. SMS-delivered codes are not supported by
+     this login path — if your account only has SMS 2FA, either add an
+     authenticator app under Instagram → Settings → Two-factor authentication
+     first, or use the Session ID method above instead. If Instagram throws a
+     security checkpoint (different from 2FA), the app will tell you to clear
+     it by logging in normally via the app/website first, then retry here.
 3. **Sync following list** — pulls all ~7,300 accounts you follow. Takes a
    few minutes; only needs to be done once (re-run any time to pick up new
    follows).

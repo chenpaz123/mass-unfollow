@@ -47,8 +47,10 @@
           <button type="submit">Log in</button>
         </form>
         <form id="form-2fa" class="hidden">
-          <p class="muted">Enter the 2FA code from your authenticator app / SMS.</p>
-          <input type="text" id="ig-2fa-code" placeholder="6-digit code" required />
+          <p class="muted">This account has two-factor authentication on. Open Google Authenticator (or
+            whichever app you use) and enter the current 6-digit code for Instagram below. SMS codes are not
+            supported — only authenticator app (TOTP) codes.</p>
+          <input type="text" id="ig-2fa-code" placeholder="6-digit code" inputmode="numeric" autocomplete="one-time-code" required />
           <button type="submit">Submit code</button>
         </form>
       </div>
