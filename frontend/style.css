@@ -138,6 +138,18 @@ button:disabled { opacity: 0.5; cursor: default; }
 .badges { margin-top: 10px; display: flex; gap: 6px; }
 .badge { font-size: 0.72rem; padding: 2px 8px; border-radius: 20px; background: var(--panel-2); color: var(--muted); }
 
+.profile-link {
+  margin-top: 18px;
+  font-size: 0.82rem;
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  padding: 6px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+}
+.profile-link:hover { border-color: var(--accent); }
+
 .stamp {
   position: absolute; top: 26px; padding: 6px 14px; border: 3px solid; border-radius: 8px;
   font-weight: 800; font-size: 1.3rem; letter-spacing: 1px; opacity: 0; transform: rotate(-12deg);

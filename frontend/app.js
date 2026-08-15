@@ -242,6 +242,7 @@ function buildCardEl() {
     <div class="username"></div>
     <div class="full-name"></div>
     <div class="badges"></div>
+    <a class="profile-link" target="_blank" rel="noopener noreferrer">View on Instagram ↗</a>
   `;
   el.addEventListener("pointerdown", onPointerDown);
   return el;
@@ -267,6 +268,7 @@ function renderCard(card) {
   badges.innerHTML = "";
   if (card.is_private) badges.innerHTML += '<span class="badge">Private</span>';
   if (card.is_verified) badges.innerHTML += '<span class="badge">Verified</span>';
+  cardEl.querySelector(".profile-link").href = `https://www.instagram.com/${encodeURIComponent(card.username)}/`;
 }
 
 function showEmptyState() {
@@ -321,6 +323,7 @@ document.addEventListener("keydown", (e) => {
 
 function onPointerDown(e) {
   if (!cardEl) return;
+  if (e.target.closest("a")) return; // let the "View on Instagram" link work normally
   cardEl.setPointerCapture(e.pointerId);
   dragState = { startX: e.clientX, startY: e.clientY };
   cardEl.classList.add("dragging");
