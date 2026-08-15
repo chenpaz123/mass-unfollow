@@ -704,11 +704,15 @@ async function refreshReview() {
     const daysLeft = Math.ceil(wstate.remaining_to_unfollow / wstate.daily_cap);
     lines.push(`Estimated time left: ~${daysLeft} day${daysLeft === 1 ? "" : "s"} at this pace`);
   }
+  if (wstate.stuck > 0) {
+    lines.push(`Skipped after repeated errors: ${wstate.stuck} (won't retry automatically — see below)`);
+  }
   if (wstate.last_error) lines.push(`Last error: ${wstate.last_error}`);
   statusEl.innerHTML = lines.map((l) => `<div>${l}</div>`).join("");
 
   document.getElementById("btn-worker-start").classList.toggle("hidden", wstate.enabled);
   document.getElementById("btn-worker-stop").classList.toggle("hidden", !wstate.enabled);
+  document.getElementById("btn-retry-stuck").classList.toggle("hidden", wstate.stuck === 0);
 
   const sync = await api("/api/sync/status");
   const lastSyncedEl = document.getElementById("last-synced");
@@ -770,6 +774,18 @@ document.getElementById("btn-worker-stop").addEventListener("click", async (e) =
   await withLoading(e.currentTarget, "Pausing…", async () => {
     try {
       await api("/api/worker/config", { method: "POST", body: { enabled: false } });
+      await refreshReview();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+});
+
+document.getElementById("btn-retry-stuck").addEventListener("click", async (e) => {
+  await withLoading(e.currentTarget, "Retrying…", async () => {
+    try {
+      await api("/api/worker/retry-stuck", { method: "POST" });
+      showToast("Back in the queue — the worker will retry them", false);
       await refreshReview();
     } catch (err) {
       showToast(err.message);

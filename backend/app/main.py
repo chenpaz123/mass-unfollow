@@ -519,7 +519,14 @@ def worker_status():
     state = db.get_worker_state()
     stats_ = db.get_stats()
     state["remaining_to_unfollow"] = stats_["remove"] - stats_["unfollowed"]
+    state["stuck"] = stats_["stuck"]
     return state
+
+
+@app.post("/api/worker/retry-stuck", dependencies=[Depends(require_auth)])
+def worker_retry_stuck():
+    db.retry_stuck_accounts()
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

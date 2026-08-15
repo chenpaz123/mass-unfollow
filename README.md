@@ -26,7 +26,15 @@ turn them off or push them to extremes (see [Safe pacing](#safe-pacing) below).
 - **Unfollow worker**: a background loop that only processes the "unfollow"
   pile, one account every 45–180 seconds (configurable), capped at 150/day by
   default. Runs continuously server-side across as many days as it takes to
-  clear the backlog — pause/resume any time from the Queue tab.
+  clear the backlog — pause/resume any time from the Queue tab. If Instagram
+  ever signals it directly (a rate-limit or "please wait" response, not just
+  a generic error), the worker **pauses itself automatically** rather than
+  quietly retrying at the normal pace — check the Queue tab for why before
+  resuming. A single account that keeps failing for any other reason (already
+  gone, some IG-side quirk) gets skipped after 3 attempts instead of jamming
+  the rest of the queue behind it — visible as "skipped after repeated
+  errors" on the Queue tab, with a button to put them back in rotation once
+  you've looked into it.
 - Everything — your Instagram session, the database, cached avatars — stays
   on your own server, in `./data`.
 

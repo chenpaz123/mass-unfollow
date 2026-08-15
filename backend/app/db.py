@@ -96,6 +96,8 @@ def init_db():
             conn.execute("ALTER TABLE accounts ADD COLUMN follows_back INTEGER")
         if "follows_back_checked" not in existing_cols:
             conn.execute("ALTER TABLE accounts ADD COLUMN follows_back_checked INTEGER NOT NULL DEFAULT 0")
+        if "fail_count" not in existing_cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN fail_count INTEGER NOT NULL DEFAULT 0")
 
         conn.commit()
 
@@ -175,7 +177,10 @@ def record_decision(user_id: str, decision: str):
     now = time.time()
     with db_lock() as conn:
         conn.execute(
-            "UPDATE accounts SET decision = ?, decided_at = ? WHERE user_id = ?",
+            # Reset fail_count on every fresh decision — a new "remove" decision
+            # (including re-queuing something after it previously failed
+            # repeatedly and got skipped) always gets a clean slate of retries.
+            "UPDATE accounts SET decision = ?, decided_at = ?, fail_count = 0 WHERE user_id = ?",
             (decision, now, user_id),
         )
         conn.execute(
@@ -194,11 +199,36 @@ def undo_last_decision() -> str | None:
             return None
         conn.execute("DELETE FROM decision_log WHERE id = ?", (row["id"],))
         conn.execute(
-            "UPDATE accounts SET decision = 'pending', decided_at = NULL WHERE user_id = ? AND unfollowed_at IS NULL",
+            "UPDATE accounts SET decision = 'pending', decided_at = NULL, fail_count = 0 "
+            "WHERE user_id = ? AND unfollowed_at IS NULL",
             (row["user_id"],),
         )
         conn.commit()
         return row["user_id"]
+
+
+# After this many failed unfollow attempts on the same account, the worker
+# stops retrying it automatically (see get_next_to_unfollow) so one broken
+# account (deleted, already unfollowed elsewhere, some IG-side quirk) can't
+# wedge the entire queue forever. Still visible via get_stats()["stuck"] and
+# recoverable with retry_stuck_accounts().
+MAX_ACCOUNT_FAIL_COUNT = 3
+
+
+def bump_account_fail_count(user_id: str):
+    with db_lock() as conn:
+        conn.execute("UPDATE accounts SET fail_count = fail_count + 1 WHERE user_id = ?", (user_id,))
+        conn.commit()
+
+
+def retry_stuck_accounts():
+    """Resets fail_count so accounts skipped after repeated failures get
+    picked up by the worker again."""
+    with db_lock() as conn:
+        conn.execute(
+            "UPDATE accounts SET fail_count = 0 WHERE decision = 'remove' AND unfollowed_at IS NULL"
+        )
+        conn.commit()
 
 
 def get_stats() -> dict:
@@ -210,11 +240,16 @@ def get_stats() -> dict:
         unfollowed = conn.execute(
             "SELECT COUNT(*) AS n FROM accounts WHERE unfollowed_at IS NOT NULL"
         ).fetchone()["n"]
+        stuck = conn.execute(
+            "SELECT COUNT(*) AS n FROM accounts WHERE decision = 'remove' AND unfollowed_at IS NULL AND fail_count >= ?",
+            (MAX_ACCOUNT_FAIL_COUNT,),
+        ).fetchone()["n"]
         total = conn.execute("SELECT COUNT(*) AS n FROM accounts").fetchone()["n"]
         return {
             "total": total,
             "pending": counts.get("pending", 0),
             "keep": counts.get("keep", 0),
+            "stuck": stuck,
             "remove": counts.get("remove", 0),
             "unfollowed": unfollowed,
         }
@@ -278,8 +313,9 @@ def update_worker_config(enabled: bool = None, daily_cap: int = None, min_delay_
 def get_next_to_unfollow() -> dict | None:
     with db_lock() as conn:
         row = conn.execute(
-            "SELECT * FROM accounts WHERE decision = 'remove' AND unfollowed_at IS NULL "
-            "ORDER BY decided_at ASC LIMIT 1"
+            "SELECT * FROM accounts WHERE decision = 'remove' AND unfollowed_at IS NULL AND fail_count < ? "
+            "ORDER BY decided_at ASC LIMIT 1",
+            (MAX_ACCOUNT_FAIL_COUNT,),
         ).fetchone()
         return dict(row) if row else None
 
@@ -372,7 +408,10 @@ def update_decision_generic(user_id: str, decision: str):
     decided_at = None if decision == "pending" else time.time()
     with db_lock() as conn:
         conn.execute(
-            "UPDATE accounts SET decision = ?, decided_at = ? WHERE user_id = ?",
+            # Reset fail_count same as record_decision -- a fresh decision from
+            # History (e.g. re-queuing something after it got skipped) gets a
+            # clean slate of retries too.
+            "UPDATE accounts SET decision = ?, decided_at = ?, fail_count = 0 WHERE user_id = ?",
             (decision, decided_at, user_id),
         )
         conn.commit()
