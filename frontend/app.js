@@ -299,13 +299,26 @@ document.getElementById("btn-go-swipe").addEventListener("click", () => switchTa
 const cardStack = document.getElementById("card-stack");
 const swipeEmpty = document.getElementById("swipe-empty");
 
-// Two-card buffer: topEl/topCard is the live, draggable card; nextEl/nextCard
-// sits visually behind it (Tinder-style peek) and is promoted instantly when
-// the top card is swiped, so there's never a fetch delay for the reveal.
+// topEl/topCard is the live, draggable card; nextEl/nextCard sits visually
+// behind it (Tinder-style peek) and is promoted instantly when the top card
+// is swiped, so there's never a fetch delay for the reveal. Beyond those two,
+// prefetchQueue holds a few more cards with no DOM element at all — just
+// enough to keep their last-post/follows-back lookups warming in the
+// background ahead of time (BUFFER_SIZE total lookahead), without visually
+// stacking more than two cards.
+const BUFFER_SIZE = 5;
 let topEl = null, topCard = null;
 let nextEl = null, nextCard = null;
+let prefetchQueue = [];
 let dragState = null;
 let refilling = false;
+
+function knownCardIds() {
+  const ids = new Set(prefetchQueue.map((c) => c.user_id));
+  if (topCard) ids.add(topCard.user_id);
+  if (nextCard) ids.add(nextCard.user_id);
+  return ids;
+}
 
 function makeCardEl(card, roleClass) {
   const el = document.createElement("div");
@@ -361,15 +374,17 @@ function renderLastPost(el, state, lastPostAt) {
   else target.textContent = `Last post ${timeAgo(lastPostAt)}`;
 }
 
-// Called both as a prefetch (for the buffered card sitting behind the top
-// one, so it's likely already resolved by the time it's promoted — no
-// "Checking…" flash) and again once a card actually becomes the visible top
-// card. The in-flight promise is cached on the card object itself so those
-// two calls for the same card share one request instead of firing twice —
-// still one Instagram lookup per account, just started earlier.
+// Called as a pure background prefetch (el === null, for cards sitting in
+// prefetchQueue with no DOM element yet), as a prefetch for the buffered
+// "next" card (which does have a DOM element, just not visible on top yet —
+// likely already resolved by the time it's promoted, no "Checking…" flash),
+// and again once a card actually becomes the visible top card. The in-flight
+// promise is cached on the card object itself so all of those calls for the
+// same card share one request instead of firing multiple times — still one
+// Instagram lookup per account, just started earlier.
 async function loadLastPost(el, card) {
   if (card.last_post_checked) {
-    renderLastPost(el, "value", card.last_post_at);
+    if (el) renderLastPost(el, "value", card.last_post_at);
     return;
   }
   if (!card._lastPostPromise) {
@@ -377,16 +392,14 @@ async function loadLastPost(el, card) {
       .catch(() => null)
       .finally(() => { card._lastPostPromise = null; });
   }
-  renderLastPost(el, "loading");
+  if (el) renderLastPost(el, "loading");
   const result = await card._lastPostPromise;
-  if (el.dataset.userId !== card.user_id) return; // card moved on before this resolved
   if (result && result.checked) {
     card.last_post_checked = true;
     card.last_post_at = result.last_post_at;
-    renderLastPost(el, "value", result.last_post_at);
-  } else {
-    renderLastPost(el, "unknown");
   }
+  if (!el || el.dataset.userId !== card.user_id) return; // prefetch-only, or card moved on before this resolved
+  renderLastPost(el, result && result.checked ? "value" : "unknown", card.last_post_at);
 }
 
 function renderFollowsBack(el, state, followsBack) {
@@ -406,12 +419,13 @@ function renderFollowsBack(el, state, followsBack) {
   }
 }
 
-// Same prefetch-and-share-in-flight-promise pattern as loadLastPost, kept as
-// a separate call so each signal is independently cached and one failing
+// Same prefetch-and-share-in-flight-promise pattern as loadLastPost
+// (including the el === null pure-background-prefetch mode), kept as a
+// separate call so each signal is independently cached and one failing
 // doesn't block the other.
 async function loadFollowsBack(el, card) {
   if (card.follows_back_checked) {
-    renderFollowsBack(el, "value", card.follows_back);
+    if (el) renderFollowsBack(el, "value", card.follows_back);
     return;
   }
   if (!card._followsBackPromise) {
@@ -419,25 +433,24 @@ async function loadFollowsBack(el, card) {
       .catch(() => null)
       .finally(() => { card._followsBackPromise = null; });
   }
-  renderFollowsBack(el, "loading");
+  if (el) renderFollowsBack(el, "loading");
   const result = await card._followsBackPromise;
-  if (el.dataset.userId !== card.user_id) return; // card moved on before this resolved
   if (result && result.checked) {
     card.follows_back_checked = true;
     card.follows_back = result.follows_back;
-    renderFollowsBack(el, "value", result.follows_back);
-  } else {
-    renderFollowsBack(el, "unknown");
   }
+  if (!el || el.dataset.userId !== card.user_id) return; // prefetch-only, or card moved on before this resolved
+  renderFollowsBack(el, result && result.checked ? "value" : "unknown", card.follows_back);
 }
 
 async function initQueue() {
-  const { cards } = await api("/api/queue/peek?limit=2");
+  const { cards } = await api(`/api/queue/peek?limit=${BUFFER_SIZE}`);
   if (topEl) topEl.remove();
   if (nextEl) nextEl.remove();
   topEl = nextEl = null;
   topCard = cards[0] || null;
   nextCard = cards[1] || null;
+  prefetchQueue = cards.slice(2);
 
   swipeEmpty.classList.toggle("hidden", !!topCard);
   if (!topCard) { updateRemaining(); return; }
@@ -456,6 +469,9 @@ async function initQueue() {
   cardStack.appendChild(topEl);
   loadLastPost(topEl, topCard);
   loadFollowsBack(topEl, topCard);
+  // No DOM for these — pure background prefetch, further ahead than what's
+  // ever visually stacked.
+  prefetchQueue.forEach((c) => { loadLastPost(null, c); loadFollowsBack(null, c); });
   updateRemaining();
 }
 
@@ -485,18 +501,43 @@ async function updateRemaining() {
   checkMilestone(reviewed);
 }
 
-async function refillNext() {
-  if (refilling || !topCard || nextCard) return;
+// Tops the whole lookahead buffer (top + next + prefetchQueue) back up to
+// BUFFER_SIZE. Promotes straight from prefetchQueue into the visible "next"
+// slot first if that's empty (already in memory, no network wait), then
+// fetches more pending accounts from the server only for whatever's still
+// short, skipping anything already known so the same card never gets
+// buffered twice.
+async function refillBuffer() {
+  if (refilling || !topCard) return;
   refilling = true;
   try {
-    const { cards } = await api("/api/queue/peek?limit=2");
-    const fresh = cards.find((c) => c.user_id !== topCard.user_id) || null;
-    if (fresh && topCard && !nextCard) {
-      nextCard = fresh;
-      nextEl = makeCardEl(fresh, "behind");
+    if (!nextCard && prefetchQueue.length > 0) {
+      nextCard = prefetchQueue.shift();
+      nextEl = makeCardEl(nextCard, "behind");
       cardStack.insertBefore(nextEl, topEl);
       loadLastPost(nextEl, nextCard);
       loadFollowsBack(nextEl, nextCard);
+    }
+    const haveCount = 1 + (nextCard ? 1 : 0) + prefetchQueue.length; // topCard is always present here
+    if (haveCount >= BUFFER_SIZE) return;
+
+    const { cards } = await api(`/api/queue/peek?limit=${BUFFER_SIZE + 10}`);
+    const known = knownCardIds();
+    for (const c of cards) {
+      if (1 + (nextCard ? 1 : 0) + prefetchQueue.length >= BUFFER_SIZE) break;
+      if (known.has(c.user_id)) continue;
+      known.add(c.user_id);
+      if (!nextCard) {
+        nextCard = c;
+        nextEl = makeCardEl(c, "behind");
+        cardStack.insertBefore(nextEl, topEl);
+        loadLastPost(nextEl, nextCard);
+        loadFollowsBack(nextEl, nextCard);
+      } else {
+        prefetchQueue.push(c);
+        loadLastPost(null, c);
+        loadFollowsBack(null, c);
+      }
     }
   } finally {
     refilling = false;
@@ -527,22 +568,32 @@ async function flyOut(decision) {
     topEl.addEventListener("pointerdown", onPointerDown);
     loadLastPost(topEl, topCard);
     loadFollowsBack(topEl, topCard);
+    // Promote the next already-prefetched card into the visible "next" slot
+    // too, synchronously — no network wait, it's already been sitting in
+    // the lookahead buffer.
+    if (prefetchQueue.length > 0) {
+      nextCard = prefetchQueue.shift();
+      nextEl = makeCardEl(nextCard, "behind");
+      cardStack.insertBefore(nextEl, topEl);
+      loadLastPost(nextEl, nextCard);
+      loadFollowsBack(nextEl, nextCard);
+    }
   } else {
     swipeEmpty.classList.remove("hidden");
   }
 
   try {
-    // Awaited deliberately: refillNext() below queries the server for the next
-    // pending account, and if that query lands before this write commits, the
-    // server still sees outgoingCard as pending and can hand it right back —
-    // showing the same account again a swipe or two later.
+    // Awaited deliberately: refillBuffer() below queries the server for more
+    // pending accounts, and if that query lands before this write commits,
+    // the server still sees outgoingCard as pending and can hand it right
+    // back — showing the same account again a swipe or two later.
     await api("/api/decision", { method: "POST", body: { user_id: outgoingCard.user_id, decision } });
   } catch (e) {
     console.error("Failed to record decision:", e);
     showToast(`Couldn't save that decision: ${e.message}`);
   }
   updateRemaining();
-  refillNext();
+  refillBuffer();
 }
 
 document.getElementById("btn-keep").addEventListener("click", () => flyOut("keep"));
