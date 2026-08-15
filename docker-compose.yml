@@ -16,3 +16,22 @@ services:
       # Access control comes from Cloudflare Access + APP_PASSWORD, not from
       # network isolation — make sure both are set before exposing this.
       - "8000:8000"
+
+  # A second, fully independent instance for someone else to connect their
+  # own Instagram account to. Same image/code, but its own container, own
+  # data volume, own .env (own APP_PASSWORD/SECRET_KEY), own port — nothing
+  # here is shared with the primary instance above. This app has no
+  # multi-user support, so separate deployments are the safe way to let a
+  # second person use it without their session/data mixing with yours.
+  mass-unfollow-martin:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: mass-unfollow-martin
+    restart: unless-stopped
+    env_file:
+      - .env.martin
+    volumes:
+      - ./data-martin:/data
+    ports:
+      - "8001:8000"

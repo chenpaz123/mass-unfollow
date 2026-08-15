@@ -181,6 +181,41 @@ just refreshing, since it also clears the PWA's cached shell files first. If
 you deploy and don't see the update reflected even after that, see the
 Cloudflare caching note below.
 
+## Adding a second person
+
+This app has **no multi-user support** — one shared Instagram session, one
+shared database, one shared app password. Letting someone else log in with
+their own Instagram on your existing instance would mix their following list
+into yours and risk the background worker acting on the wrong account. The
+safe way to let someone else use it: a second, fully independent deployment,
+same code and server, nothing shared.
+
+`docker-compose.yml` already defines a second service (`mass-unfollow-martin`
+in this deployment — rename as needed for a different person) that reuses the
+same image but gets its own container, data volume, `.env` file, and port. To
+bring it up:
+
+```bash
+cd ~/mass-unfollow
+cp .env.example .env.martin
+python3 -c "import secrets; print(secrets.token_hex(32))"   # paste into .env.martin's SECRET_KEY
+nano .env.martin   # set APP_PASSWORD (a different one than the primary instance) and SECRET_KEY
+docker compose up -d --build mass-unfollow-martin
+```
+
+This publishes it on port `8001` (reachable at `172.17.0.1:8001` from
+cloudflared, same pattern as the primary instance on `8000`). Then in
+Cloudflare:
+
+1. **Published application route**: domain `unfollow-martin.chenpaz.cc`,
+   service `http://172.17.0.1:8001`.
+2. **Zero Trust Access application** (Public DNS type) on that hostname, with
+   its own policy — **Include → Emails** → that person's email only. Don't
+   add them to the primary instance's policy; that's a separate app now.
+
+`docker compose up -d --build` (no service name) rebuilds and restarts both
+instances together on future updates, since they share the same image.
+
 ## Troubleshooting: "Expecting value: line 1 column 1 (char 0)" / random 4xx errors
 
 This means Instagram sent back an empty or non-JSON response to a private API
