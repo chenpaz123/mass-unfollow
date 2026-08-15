@@ -11,10 +11,30 @@ from instagrapi.exceptions import (
     LoginRequired,
     TwoFactorRequired,
 )
+from requests.adapters import HTTPAdapter
 
 from . import config
 
 log = logging.getLogger("mass-unfollow.ig")
+
+# instagrapi never passes a `timeout=` to requests, and mounts no adapter
+# default either — a single stalled connection (Instagram or anything
+# between us and it just stops sending bytes, no error) hangs the calling
+# thread forever, which wedges ig_call_lock and freezes the entire app
+# (login, worker, avatars, everything) until the container is restarted.
+# Mounting this adapter on every client gives every request a hard ceiling
+# so a stall fails as a normal, retryable error instead.
+_HTTP_TIMEOUT_SEC = 30
+
+
+class _TimeoutHTTPAdapter(HTTPAdapter):
+    def send(self, *args, **kwargs):
+        # requests.Session.send() always passes `timeout` explicitly
+        # (None when the caller didn't set one), so a plain setdefault()
+        # would never fire here — the key already exists, just empty.
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = _HTTP_TIMEOUT_SEC
+        return super().send(*args, **kwargs)
 
 
 class AuthState:
@@ -47,6 +67,17 @@ ig_call_lock = asyncio.Lock()
 def _new_client() -> Client:
     cl = Client()
     cl.delay_range = config.IG_DELAY_RANGE
+    # Client.__init__ already mounted an adapter on `private` with retry-on-
+    # 429/5xx built in (_configure_private_session_retry) — mounting a plain
+    # adapter over it would silently replace that retry behavior, so carry
+    # its retry strategy over onto our timeout-adding adapter instead of
+    # dropping it.
+    private_adapter = _TimeoutHTTPAdapter(max_retries=cl._build_private_session_retry_strategy())
+    cl.private.mount("https://", private_adapter)
+    cl.private.mount("http://", private_adapter)
+    public_adapter = _TimeoutHTTPAdapter()
+    cl.public.mount("https://", public_adapter)
+    cl.public.mount("http://", public_adapter)
     return cl
 
 
