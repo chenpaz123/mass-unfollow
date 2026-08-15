@@ -71,6 +71,11 @@ def init_db():
                 last_synced_at REAL,
                 last_error TEXT DEFAULT ''
             );
+
+            CREATE TABLE IF NOT EXISTS kv_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
             """
         )
         conn.execute(

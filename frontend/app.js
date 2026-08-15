@@ -24,6 +24,20 @@ async function api(path, opts = {}) {
   return data;
 }
 
+let toastEl = null;
+let toastTimer = null;
+function showToast(message, isError = true) {
+  if (!toastEl) {
+    toastEl = document.createElement("div");
+    toastEl.id = "toast";
+    document.body.appendChild(toastEl);
+  }
+  toastEl.textContent = message;
+  toastEl.className = isError ? "toast error visible" : "toast visible";
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("visible"), 4000);
+}
+
 // ---------------------------------------------------------------------------
 // Boot sequence
 // ---------------------------------------------------------------------------
@@ -215,7 +229,11 @@ async function pollSync() {
 async function startSync() {
   showScreen("screen-sync");
   renderSyncScreen({ status: "running" });
-  await api("/api/sync/start", { method: "POST" });
+  try {
+    await api("/api/sync/start", { method: "POST" });
+  } catch (e) {
+    renderSyncScreen({ status: "error", last_error: e.message });
+  }
 }
 
 document.getElementById("btn-sync-start").addEventListener("click", startSync);
@@ -337,9 +355,10 @@ async function flyOut(decision) {
     swipeEmpty.classList.remove("hidden");
   }
 
-  api("/api/decision", { method: "POST", body: { user_id: outgoingCard.user_id, decision } }).catch((e) =>
-    console.error("Failed to record decision:", e)
-  );
+  api("/api/decision", { method: "POST", body: { user_id: outgoingCard.user_id, decision } }).catch((e) => {
+    console.error("Failed to record decision:", e);
+    showToast(`Couldn't save that decision: ${e.message}`);
+  });
   updateRemaining();
   refillNext();
 }
@@ -347,9 +366,17 @@ async function flyOut(decision) {
 document.getElementById("btn-keep").addEventListener("click", () => flyOut("keep"));
 document.getElementById("btn-remove").addEventListener("click", () => flyOut("remove"));
 
-document.getElementById("btn-undo").addEventListener("click", async () => {
-  const result = await api("/api/decision/undo", { method: "POST" });
-  if (result.user_id) await initQueue();
+document.getElementById("btn-undo").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  await withLoading(btn, "…", async () => {
+    try {
+      const result = await api("/api/decision/undo", { method: "POST" });
+      if (result.user_id) await initQueue();
+      else showToast("Nothing to undo", false);
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
 });
 
 document.addEventListener("keydown", (e) => {
@@ -461,24 +488,43 @@ document.getElementById("btn-resync").addEventListener("click", () => {
   startSync();
 });
 
-document.getElementById("btn-save-worker-config").addEventListener("click", async () => {
-  await api("/api/worker/config", {
-    method: "POST",
-    body: {
-      daily_cap: parseInt(document.getElementById("cfg-daily-cap").value, 10),
-      min_delay_sec: parseInt(document.getElementById("cfg-min-delay").value, 10),
-      max_delay_sec: parseInt(document.getElementById("cfg-max-delay").value, 10),
-    },
+document.getElementById("btn-save-worker-config").addEventListener("click", async (e) => {
+  await withLoading(e.currentTarget, "Saving…", async () => {
+    try {
+      await api("/api/worker/config", {
+        method: "POST",
+        body: {
+          daily_cap: parseInt(document.getElementById("cfg-daily-cap").value, 10),
+          min_delay_sec: parseInt(document.getElementById("cfg-min-delay").value, 10),
+          max_delay_sec: parseInt(document.getElementById("cfg-max-delay").value, 10),
+        },
+      });
+      await refreshReview();
+      showToast("Settings saved", false);
+    } catch (err) {
+      showToast(err.message);
+    }
   });
-  refreshReview();
 });
 
-document.getElementById("btn-worker-start").addEventListener("click", async () => {
-  await api("/api/worker/config", { method: "POST", body: { enabled: true } });
-  refreshReview();
+document.getElementById("btn-worker-start").addEventListener("click", async (e) => {
+  await withLoading(e.currentTarget, "Starting…", async () => {
+    try {
+      await api("/api/worker/config", { method: "POST", body: { enabled: true } });
+      await refreshReview();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
 });
 
-document.getElementById("btn-worker-stop").addEventListener("click", async () => {
-  await api("/api/worker/config", { method: "POST", body: { enabled: false } });
-  refreshReview();
+document.getElementById("btn-worker-stop").addEventListener("click", async (e) => {
+  await withLoading(e.currentTarget, "Pausing…", async () => {
+    try {
+      await api("/api/worker/config", { method: "POST", body: { enabled: false } });
+      await refreshReview();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
 });
