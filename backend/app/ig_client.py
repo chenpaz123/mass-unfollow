@@ -183,24 +183,48 @@ def submit_2fa_code(code: str):
             auth_state.error = "No login in progress."
         return
 
+    code = code.strip()
     cl = _new_client()
     try:
-        cl.login(username, password, verification_code=code.strip())
+        cl.login(username, password, verification_code=code)
         _adopt_authenticated_client(cl)
+        return
     except Exception as e:
         if _is_soft_login_flow_failure(cl):
             log.warning("login_flow() warm-up call failed after 2FA succeeded: %s", e)
             _adopt_authenticated_client(cl)
             return
-        with auth_state.lock:
-            auth_state.status = "error"
-            auth_state.error = (
-                f"2FA code rejected: {e}. Make sure you're entering the current code from an "
-                "authenticator app (Google Authenticator, Authy, etc) — SMS-delivered codes won't "
-                "work here. If the account only has SMS 2FA, enable an authenticator app under "
-                "Instagram → Settings → Two-factor authentication first, or use the Session ID "
-                "login method instead."
-            )
+        primary_error = e
+
+    # Some accounts reject the classic two_factor_login endpoint outright and
+    # need the newer Bloks/CAA login flow instead. instagrapi only tries that
+    # fallback automatically when the *first* login call fails with
+    # BadPassword — not when it fails with TwoFactorRequired, which is what
+    # happens here since we already know 2FA is required. bloks_caa_login()
+    # is instagrapi's own public entry point for that flow, so we drive it
+    # ourselves rather than giving up after the classic path fails.
+    cl2 = _new_client()
+    cl2.username = username
+    cl2.password = password
+    try:
+        outcome = cl2.bloks_caa_login(username=username, password=password, verification_code=code)
+    except Exception as e2:
+        log.warning("Bloks/CAA 2FA fallback also failed: %s", e2)
+        outcome = {"logged_in": False, "reason": str(e2)}
+
+    if outcome.get("logged_in") and cl2.user_id:
+        _adopt_authenticated_client(cl2)
+        return
+
+    with auth_state.lock:
+        auth_state.status = "error"
+        auth_state.error = (
+            f"2FA code rejected: {primary_error}. Make sure you're entering the current code from an "
+            "authenticator app (Google Authenticator, Authy, etc) — SMS-delivered codes won't "
+            "work here. If the account only has SMS 2FA, enable an authenticator app under "
+            "Instagram → Settings → Two-factor authentication first, or use the Session ID "
+            "login method instead."
+        )
 
 
 def logout():
