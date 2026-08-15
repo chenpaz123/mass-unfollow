@@ -632,6 +632,7 @@ async function refreshReview() {
     <div><span class="n">${stats.total}</span><span class="label">Total following</span></div>
     <div><span class="n">${stats.pending}</span><span class="label">Not yet reviewed</span></div>
     <div><span class="n">${stats.keep}</span><span class="label">Kept</span></div>
+    <div><span class="n">${stats.unfollowed}</span><span class="label">Unfollowed</span></div>
     <div><span class="n">${toUnfollow}</span><span class="label">Queued to unfollow</span></div>
   `;
 

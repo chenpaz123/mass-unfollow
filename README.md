@@ -43,7 +43,8 @@ turn them off or push them to extremes (see [Safe pacing](#safe-pacing) below).
   decision. A running **reviewed** counter sits above the stack next to the
   remaining count, with a small toast celebration every 100 accounts reviewed
   (a bigger one on round thousands).
-- **Queue** — stats (total / not yet reviewed / kept / queued to unfollow),
+- **Queue** — stats (total / not yet reviewed / kept / unfollowed / queued to
+  unfollow),
   a **Resync following list** button to pick up new follows later, a
   **swipe order** control to reorder everyone not yet reviewed (private
   first, no display name first, verified last, or shuffled — computed from

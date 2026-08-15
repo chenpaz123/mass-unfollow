@@ -239,6 +239,9 @@ button { transition: transform 0.08s ease, opacity 0.15s ease; }
 .stats-grid div {
   background: var(--panel-2); border-radius: 10px; padding: 12px; text-align: center;
 }
+/* An odd number of cards would otherwise leave the last one stranded at
+   half-width with empty space beside it — span it across both columns. */
+.stats-grid div:last-child:nth-child(odd) { grid-column: span 2; }
 .stats-grid .n { font-size: 1.3rem; font-weight: 700; display: block; }
 .stats-grid .label { color: var(--muted); font-size: 0.78rem; }
 
