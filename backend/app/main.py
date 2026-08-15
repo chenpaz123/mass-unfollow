@@ -187,7 +187,7 @@ def ig_logout():
 SYNC_FLUSH_EVERY = 50
 
 
-def _sync_worker() -> int:
+def _sync_worker() -> tuple[int, int]:
     """Runs in a worker thread. Paginates through the following list,
     flushing batches to the DB as they arrive so progress is real (shown
     to the user as it happens) and isn't lost if something fails partway."""
@@ -209,15 +209,22 @@ def _sync_worker() -> int:
             db.set_sync_status("running", fetched_count=fetched, total_count=total)
     if batch:
         db.upsert_accounts(batch)
-    return fetched
+    return fetched, total
 
 
 async def _run_sync():
     try:
         async with ig_client.ig_call_lock:
-            fetched = await asyncio.to_thread(_sync_worker)
+            fetched, total = await asyncio.to_thread(_sync_worker)
         db.randomize_sort_order()
-        db.set_sync_status("done", fetched_count=fetched, total_count=fetched)
+        # Instagram's own following count (fetched up front, before pagination)
+        # is the ground truth. A large following list can have its pagination
+        # end early — Instagram just stops returning a next page, no error —
+        # so `fetched` can land short of it. Keep the real total instead of
+        # overwriting it with `fetched`, so that gap stays visible in the UI
+        # (and tells the user a resync may still be worth trying) rather than
+        # silently reporting every sync as fully complete.
+        db.set_sync_status("done", fetched_count=fetched, total_count=max(total, fetched))
     except Exception as e:
         log.exception("Sync failed")
         db.set_sync_status("error", error=str(e))

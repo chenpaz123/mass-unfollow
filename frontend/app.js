@@ -256,7 +256,9 @@ function renderSyncScreen(state) {
     syncPollTimer = null;
     progress.classList.add("hidden");
     fill.classList.remove("indeterminate");
-    summary.textContent = `Synced ${state.total_count} accounts you follow.`;
+    summary.textContent = state.total_count > state.fetched_count
+      ? `Synced ${state.fetched_count} of ${state.total_count} accounts you follow — Instagram's following list cut off early. Try "Sync following list" again to pick up the rest.`
+      : `Synced ${state.total_count} accounts you follow.`;
     goBtn.classList.remove("hidden");
   } else if (state.status === "error") {
     clearInterval(syncPollTimer);
