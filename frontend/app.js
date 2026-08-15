@@ -155,6 +155,28 @@ document.getElementById("form-sessionid").addEventListener("submit", async (e) =
   });
 });
 
+// Instagram's own device-approval challenge (a push notification the user
+// has to go tap "Yes, it was me" on) can keep a login request open far
+// longer than a normal login — long enough that Cloudflare/the browser drop
+// the connection client-side (Safari surfaces this as a generic "Load
+// failed") even though the backend thread is still running and completes
+// the login successfully moments later. So instead of trusting the single
+// POST's response to carry the outcome, fire it and poll the existing
+// status endpoint — same pattern as sync — until the backend's real state
+// (set from the same thread, independent of whether the HTTP response ever
+// made it back) shows up.
+async function waitForIgLogin(startStatus) {
+  for (let i = 0; i < 100; i++) {
+    const snap = await api("/api/ig/status");
+    if (snap.status !== startStatus && snap.status !== "logging_in") return snap;
+    await new Promise((r) => setTimeout(r, i < 10 ? 300 : 2000));
+  }
+  return {
+    status: "error",
+    error: "Still waiting on Instagram — this can take a while if it's waiting for you to approve a login on your phone. Check back in a minute.",
+  };
+}
+
 document.getElementById("form-password").addEventListener("submit", async (e) => {
   e.preventDefault();
   const err = document.getElementById("ig-login-error");
@@ -162,13 +184,15 @@ document.getElementById("form-password").addEventListener("submit", async (e) =>
   const btn = e.target.querySelector("button");
   await withLoading(btn, "Logging in…", async () => {
     try {
-      const result = await api("/api/ig/login/password", {
+      const startStatus = (await api("/api/ig/status")).status;
+      api("/api/ig/login/password", {
         method: "POST",
         body: {
           username: document.getElementById("ig-username").value,
           password: document.getElementById("ig-password").value,
         },
-      });
+      }).catch(() => {});
+      const result = await waitForIgLogin(startStatus);
       if (result.status === "authenticated") { await boot(); return; }
       if (result.status === "need_2fa") { document.getElementById("form-2fa").classList.remove("hidden"); return; }
       err.textContent = result.error || "Login failed.";
@@ -185,10 +209,12 @@ document.getElementById("form-2fa").addEventListener("submit", async (e) => {
   const btn = e.target.querySelector("button");
   await withLoading(btn, "Verifying…", async () => {
     try {
-      const result = await api("/api/ig/login/2fa", {
+      const startStatus = (await api("/api/ig/status")).status;
+      api("/api/ig/login/2fa", {
         method: "POST",
         body: { code: document.getElementById("ig-2fa-code").value },
-      });
+      }).catch(() => {});
+      const result = await waitForIgLogin(startStatus);
       if (result.status === "authenticated") await boot();
       else err.textContent = result.error || "Code rejected.";
     } catch (e2) {

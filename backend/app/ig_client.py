@@ -183,6 +183,9 @@ def submit_2fa_code(code: str):
             auth_state.error = "No login in progress."
         return
 
+    with auth_state.lock:
+        auth_state.status = "logging_in"
+
     code = code.strip()
     cl = _new_client()
     try:
