@@ -376,10 +376,16 @@ async function flyOut(decision) {
     swipeEmpty.classList.remove("hidden");
   }
 
-  api("/api/decision", { method: "POST", body: { user_id: outgoingCard.user_id, decision } }).catch((e) => {
+  try {
+    // Awaited deliberately: refillNext() below queries the server for the next
+    // pending account, and if that query lands before this write commits, the
+    // server still sees outgoingCard as pending and can hand it right back —
+    // showing the same account again a swipe or two later.
+    await api("/api/decision", { method: "POST", body: { user_id: outgoingCard.user_id, decision } });
+  } catch (e) {
     console.error("Failed to record decision:", e);
     showToast(`Couldn't save that decision: ${e.message}`);
-  });
+  }
   updateRemaining();
   refillNext();
 }
