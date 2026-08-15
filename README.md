@@ -39,7 +39,9 @@ turn them off or push them to extremes (see [Safe pacing](#safe-pacing) below).
   cached the first time you see that card, so it's one Instagram lookup per
   account you actually view — a quick way to spot dead/inactive accounts) and
   a **View on Instagram** link to double-check before deciding. Undo reverts
-  your last decision.
+  your last decision. A running **reviewed** counter sits above the stack next
+  to the remaining count, with a small toast celebration every 100 accounts
+  reviewed (a bigger one on round thousands).
 - **Queue** — stats (total / not yet reviewed / kept / queued to unfollow),
   a **Resync following list** button to pick up new follows later, and the
   unfollow worker controls (daily cap, delay range, start/pause, live

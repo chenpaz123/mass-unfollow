@@ -403,9 +403,30 @@ async function initQueue() {
   updateRemaining();
 }
 
+// Celebrates every 100 accounts reviewed (keep + remove decisions), with a
+// bigger toast on round thousands. Persisted in localStorage so a page
+// reload doesn't replay every milestone already crossed, and undoing a
+// decision back below a milestone then re-crossing it again doesn't refire
+// the same one twice.
+const MILESTONE_STEP = 100;
+const MILESTONE_STORAGE_KEY = "mu-last-milestone";
+
+function checkMilestone(reviewedCount) {
+  const last = parseInt(localStorage.getItem(MILESTONE_STORAGE_KEY) || "0", 10);
+  const milestone = Math.floor(reviewedCount / MILESTONE_STEP) * MILESTONE_STEP;
+  if (milestone > 0 && milestone > last) {
+    localStorage.setItem(MILESTONE_STORAGE_KEY, String(milestone));
+    const bigMilestone = milestone % 1000 === 0;
+    showToast(`${bigMilestone ? "🏆" : "🎉"} ${milestone.toLocaleString()} accounts reviewed!`, false);
+  }
+}
+
 async function updateRemaining() {
   const stats = await api("/api/stats");
   document.getElementById("swipe-remaining").textContent = `${stats.pending} remaining`;
+  const reviewed = stats.total - stats.pending;
+  document.getElementById("swipe-reviewed").textContent = `${reviewed.toLocaleString()} reviewed`;
+  checkMilestone(reviewed);
 }
 
 async function refillNext() {

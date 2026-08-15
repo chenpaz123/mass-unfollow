@@ -132,6 +132,9 @@ button { transition: transform 0.08s ease, opacity 0.15s ease; }
   display: flex; justify-content: space-between; align-items: center;
 }
 
+.swipe-stats { display: flex; flex-direction: column; gap: 2px; }
+#swipe-reviewed { color: var(--accent); font-weight: 600; font-size: 0.95rem; }
+
 .card-stack {
   position: relative;
   width: 340px;
