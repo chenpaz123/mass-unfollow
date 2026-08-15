@@ -731,6 +731,13 @@ function applyTheme(theme) {
   }
   localStorage.setItem("mu-theme", theme);
   updateThemeButtons();
+  updateThemeColorMeta();
+}
+
+function updateThemeColorMeta() {
+  const isLight = getComputedStyle(document.documentElement).colorScheme.trim() === "light";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", isLight ? "#f4f5f7" : "#0f1115");
 }
 
 function updateThemeButtons() {
@@ -743,3 +750,15 @@ function updateThemeButtons() {
 document.querySelectorAll(".theme-btn").forEach((btn) => {
   btn.addEventListener("click", () => applyTheme(btn.dataset.theme));
 });
+updateThemeColorMeta();
+window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", updateThemeColorMeta);
+
+// ---------------------------------------------------------------------------
+// PWA install support
+// ---------------------------------------------------------------------------
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((e) => console.error("SW registration failed:", e));
+  });
+}
