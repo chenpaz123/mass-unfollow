@@ -61,6 +61,10 @@ def is_authenticated() -> bool:
     return _client is not None and auth_state.status == "authenticated"
 
 
+def get_connected_username() -> str | None:
+    return _client.username if _client else None
+
+
 def try_restore_session() -> bool:
     """Attempt to restore a previously saved session on startup."""
     global _client
@@ -240,6 +244,11 @@ def iter_own_following():
 def unfollow(user_id: str):
     cl = get_client()
     cl.user_unfollow(int(user_id))
+
+
+def refollow(user_id: str):
+    cl = get_client()
+    cl.user_follow(int(user_id))
 
 
 def fetch_avatar_bytes(profile_pic_url: str) -> bytes | None:

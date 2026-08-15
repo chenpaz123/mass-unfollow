@@ -273,3 +273,74 @@ def reset_daily_counter(day_marker: str):
             (day_marker,),
         )
         conn.commit()
+
+
+def search_accounts(
+    query: str = "", decision: str | None = None, limit: int = 100, offset: int = 0
+) -> tuple[list[dict], int]:
+    clauses = []
+    params: list = []
+    if query:
+        clauses.append("(username LIKE ? OR full_name LIKE ?)")
+        like = f"%{query}%"
+        params.extend([like, like])
+    if decision:
+        clauses.append("decision = ?")
+        params.append(decision)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with db_lock() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM accounts {where} "
+            "ORDER BY COALESCE(decided_at, 0) DESC, username ASC LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        ).fetchall()
+        total = conn.execute(f"SELECT COUNT(*) AS n FROM accounts {where}", params).fetchone()["n"]
+        return [dict(r) for r in rows], total
+
+
+def update_decision_generic(user_id: str, decision: str):
+    """Set a decision directly (used from History, unlike record_decision this
+    doesn't append to decision_log — undo only ever applies to the swipe flow)."""
+    decided_at = None if decision == "pending" else time.time()
+    with db_lock() as conn:
+        conn.execute(
+            "UPDATE accounts SET decision = ?, decided_at = ? WHERE user_id = ?",
+            (decision, decided_at, user_id),
+        )
+        conn.commit()
+
+
+def clear_unfollowed(user_id: str):
+    with db_lock() as conn:
+        conn.execute(
+            "UPDATE accounts SET decision = 'keep', decided_at = ?, unfollowed_at = NULL WHERE user_id = ?",
+            (time.time(), user_id),
+        )
+        conn.commit()
+
+
+def reset_all_accounts():
+    with db_lock() as conn:
+        conn.execute("DELETE FROM accounts")
+        conn.execute("DELETE FROM decision_log")
+        conn.execute(
+            "UPDATE sync_state SET status='idle', fetched_count=0, total_count=0, "
+            "last_synced_at=NULL, last_error=''"
+        )
+        conn.commit()
+
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    with db_lock() as conn:
+        row = conn.execute("SELECT value FROM kv_settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+
+def set_setting(key: str, value: str):
+    with db_lock() as conn:
+        conn.execute(
+            "INSERT INTO kv_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        conn.commit()

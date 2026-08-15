@@ -70,6 +70,27 @@ def api_logout(response: Response):
     return {"ok": True}
 
 
+class ChangeAppPasswordBody(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@app.post("/api/settings/app-password", dependencies=[Depends(require_auth)])
+def change_app_password(body: ChangeAppPasswordBody):
+    if not security.check_password(body.current_password):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    if len(body.new_password) < 4:
+        raise HTTPException(status_code=400, detail="New password must be at least 4 characters")
+    security.set_app_password(body.new_password)
+    return {"ok": True}
+
+
+@app.post("/api/settings/reset-data", dependencies=[Depends(require_auth)])
+def reset_data():
+    db.reset_all_accounts()
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Instagram auth
 # ---------------------------------------------------------------------------
@@ -92,6 +113,7 @@ class TwoFaBody(BaseModel):
 def ig_status():
     snap = ig_client.auth_state.snapshot()
     snap["authenticated"] = ig_client.is_authenticated()
+    snap["username"] = ig_client.get_connected_username() if snap["authenticated"] else None
     return snap
 
 
@@ -239,6 +261,68 @@ def post_undo():
 @app.get("/api/stats", dependencies=[Depends(require_auth)])
 def stats():
     return db.get_stats()
+
+
+# ---------------------------------------------------------------------------
+# Accounts: search + history (retroactive decisions, refollow)
+# ---------------------------------------------------------------------------
+
+
+def _history_card(row: dict) -> dict:
+    return {
+        **_card(row),
+        "decision": row["decision"],
+        "decided_at": row["decided_at"],
+        "unfollowed_at": row["unfollowed_at"],
+    }
+
+
+@app.get("/api/accounts", dependencies=[Depends(require_auth)])
+def list_accounts(q: str = "", decision: str = "", limit: int = 100, offset: int = 0):
+    if decision and decision not in ("pending", "keep", "remove"):
+        raise HTTPException(status_code=400, detail="invalid decision filter")
+    limit = max(1, min(limit, 300))
+    offset = max(0, offset)
+    rows, total = db.search_accounts(query=q.strip(), decision=decision or None, limit=limit, offset=offset)
+    return {"total": total, "accounts": [_history_card(r) for r in rows]}
+
+
+class AccountDecisionBody(BaseModel):
+    decision: str  # "keep" | "remove" | "pending"
+
+
+@app.post("/api/accounts/{user_id}/decision", dependencies=[Depends(require_auth)])
+def set_account_decision(user_id: str, body: AccountDecisionBody):
+    if body.decision not in ("keep", "remove", "pending"):
+        raise HTTPException(status_code=400, detail="invalid decision")
+    account = db.get_account(user_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Unknown account")
+    if account["unfollowed_at"] and body.decision != "remove":
+        raise HTTPException(
+            status_code=400,
+            detail="This account was already unfollowed on Instagram — use refollow instead of changing the decision.",
+        )
+    db.update_decision_generic(user_id, body.decision)
+    return {"ok": True}
+
+
+@app.post("/api/accounts/{user_id}/refollow", dependencies=[Depends(require_auth)])
+async def refollow_account(user_id: str):
+    account = db.get_account(user_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Unknown account")
+    if not account["unfollowed_at"]:
+        raise HTTPException(status_code=400, detail="This account hasn't been unfollowed through this app")
+    if not ig_client.is_authenticated():
+        raise HTTPException(status_code=400, detail="Log in to Instagram first")
+    async with ig_client.ig_call_lock:
+        try:
+            await asyncio.to_thread(ig_client.refollow, user_id)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Instagram refollow failed: {e}")
+    db.clear_unfollowed(user_id)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

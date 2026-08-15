@@ -4,6 +4,12 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Mass Unfollow</title>
+<script>
+  (function () {
+    var t = localStorage.getItem("mu-theme");
+    if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+  })();
+</script>
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -102,7 +108,7 @@
   <!-- Review / worker -->
   <section id="screen-review" class="screen hidden">
     <div class="card-panel">
-      <h1>Review</h1>
+      <h1>Queue</h1>
       <div class="stats-grid" id="stats-grid"></div>
       <p class="muted" id="last-synced"></p>
       <button id="btn-resync" class="secondary">Resync following list</button>
@@ -132,6 +138,63 @@
       </div>
     </div>
   </section>
+
+  <!-- History -->
+  <section id="screen-history" class="screen wide hidden">
+    <div class="card-panel">
+      <h1>History</h1>
+      <div class="history-controls">
+        <input type="search" id="history-search" placeholder="Search…" />
+        <select id="history-filter">
+          <option value="">All (decided first)</option>
+          <option value="keep">Kept</option>
+          <option value="remove">Unfollow queue / unfollowed</option>
+          <option value="pending">Not yet reviewed</option>
+        </select>
+      </div>
+      <div id="history-list" class="history-list"></div>
+      <p class="muted hidden" id="history-empty">No results.</p>
+      <button id="btn-history-more" class="secondary hidden">Load more</button>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section id="screen-settings" class="screen hidden">
+    <div class="card-panel">
+      <h1>Settings</h1>
+
+      <h2>Instagram</h2>
+      <p class="muted" id="settings-ig-status">—</p>
+      <button id="btn-ig-disconnect" class="danger">Disconnect Instagram</button>
+
+      <h2>Appearance</h2>
+      <div class="theme-toggle" id="theme-toggle">
+        <button class="theme-btn" data-theme="dark">Dark</button>
+        <button class="theme-btn" data-theme="light">Light</button>
+        <button class="theme-btn" data-theme="system">System</button>
+      </div>
+
+      <h2>App password</h2>
+      <form id="form-change-password">
+        <input type="password" id="settings-current-password" placeholder="Current password" autocomplete="current-password" required />
+        <input type="password" id="settings-new-password" placeholder="New password" autocomplete="new-password" required />
+        <button type="submit" class="secondary">Change password</button>
+      </form>
+
+      <h2>Danger zone</h2>
+      <p class="muted">Wipes every synced account and all keep/unfollow decisions from this app. Does not
+        touch anything on Instagram itself — already-unfollowed accounts stay unfollowed. You'll need to
+        resync afterward.</p>
+      <button id="btn-reset-data" class="danger">Reset all data</button>
+    </div>
+  </section>
+
+  <nav id="tab-bar" class="hidden">
+    <button class="tab-bar-btn" data-screen="screen-swipe"><span class="tab-icon">🔥</span><span>Swipe</span></button>
+    <button class="tab-bar-btn" data-screen="screen-review"><span class="tab-icon">⏳</span><span>Queue</span></button>
+    <button class="tab-bar-btn" data-screen="screen-history"><span class="tab-icon">📜</span><span>History</span></button>
+    <button class="tab-bar-btn" data-screen="screen-settings"><span class="tab-icon">⚙️</span><span>Settings</span></button>
+  </nav>
 
 </div>
 <script src="/app.js"></script>

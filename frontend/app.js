@@ -1,9 +1,34 @@
 const screens = {};
 document.querySelectorAll(".screen").forEach((el) => (screens[el.id] = el));
 
+const TAB_SCREENS = ["screen-swipe", "screen-review", "screen-history", "screen-settings"];
+const tabBar = document.getElementById("tab-bar");
+
 function showScreen(id) {
   Object.values(screens).forEach((el) => el.classList.add("hidden"));
   screens[id].classList.remove("hidden");
+
+  const isTabScreen = TAB_SCREENS.includes(id);
+  tabBar.classList.toggle("hidden", !isTabScreen);
+  document.body.classList.toggle("has-tabbar", isTabScreen);
+  if (isTabScreen) {
+    document.querySelectorAll(".tab-bar-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.screen === id);
+    });
+  }
+}
+
+// Switches to one of the four persistent tabs, loading/refreshing that
+// tab's data and stopping any polling owned by the tab being left.
+function switchTab(id) {
+  stopWorkerPolling();
+  showScreen(id);
+  if (id === "screen-swipe") initQueue();
+  else if (id === "screen-review") {
+    refreshReview();
+    workerPollTimer = setInterval(refreshReview, 5000);
+  } else if (id === "screen-history") loadHistory(true);
+  else if (id === "screen-settings") loadSettingsScreen();
 }
 
 async function api(path, opts = {}) {
@@ -59,8 +84,7 @@ async function boot() {
     renderSyncScreen(sync);
     return;
   }
-  showScreen("screen-swipe");
-  initQueue();
+  switchTab("screen-swipe");
 }
 
 boot().catch((e) => console.error(e));
@@ -238,10 +262,7 @@ async function startSync() {
 
 document.getElementById("btn-sync-start").addEventListener("click", startSync);
 
-document.getElementById("btn-go-swipe").addEventListener("click", () => {
-  showScreen("screen-swipe");
-  initQueue();
-});
+document.getElementById("btn-go-swipe").addEventListener("click", () => switchTab("screen-swipe"));
 
 // ---------------------------------------------------------------------------
 // Swipe
@@ -423,12 +444,12 @@ function onPointerUp(e) {
   }
 }
 
-document.getElementById("btn-review").addEventListener("click", () => openReview());
-document.getElementById("btn-go-review-2").addEventListener("click", () => openReview());
-document.getElementById("btn-back-swipe").addEventListener("click", () => {
-  stopWorkerPolling();
-  showScreen("screen-swipe");
-  initQueue();
+document.getElementById("btn-review").addEventListener("click", () => switchTab("screen-review"));
+document.getElementById("btn-go-review-2").addEventListener("click", () => switchTab("screen-review"));
+document.getElementById("btn-back-swipe").addEventListener("click", () => switchTab("screen-swipe"));
+
+document.querySelectorAll(".tab-bar-btn").forEach((btn) => {
+  btn.addEventListener("click", () => switchTab(btn.dataset.screen));
 });
 
 // ---------------------------------------------------------------------------
@@ -436,12 +457,6 @@ document.getElementById("btn-back-swipe").addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 
 let workerPollTimer = null;
-
-function openReview() {
-  showScreen("screen-review");
-  refreshReview();
-  if (!workerPollTimer) workerPollTimer = setInterval(refreshReview, 5000);
-}
 
 function stopWorkerPolling() {
   clearInterval(workerPollTimer);
@@ -527,4 +542,204 @@ document.getElementById("btn-worker-stop").addEventListener("click", async (e) =
       showToast(err.message);
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+
+const HISTORY_PAGE_SIZE = 30;
+let historyOffset = 0;
+let historyQuery = "";
+let historyFilter = "";
+let historySearchDebounce = null;
+
+function historyWhenText(acc) {
+  const date = acc.decided_at ? new Date(acc.decided_at * 1000).toLocaleDateString() : "";
+  if (acc.unfollowed_at) return `Unfollowed ${new Date(acc.unfollowed_at * 1000).toLocaleDateString()}`;
+  if (acc.decision === "keep") return `Kept ${date}`;
+  if (acc.decision === "remove") return `Queued to unfollow ${date}`;
+  return "Not yet reviewed";
+}
+
+function historyRowHtml(acc) {
+  const when = historyWhenText(acc);
+
+  let actions = "";
+  if (acc.unfollowed_at) {
+    actions = `<button data-action="refollow" data-id="${acc.user_id}">Refollow</button>`;
+  } else if (acc.decision === "keep") {
+    actions =
+      `<button data-action="decide" data-id="${acc.user_id}" data-decision="remove">Queue unfollow</button>` +
+      `<button data-action="decide" data-id="${acc.user_id}" data-decision="pending">Reset</button>`;
+  } else if (acc.decision === "remove") {
+    actions =
+      `<button data-action="decide" data-id="${acc.user_id}" data-decision="keep" class="primary">Keep instead</button>` +
+      `<button data-action="decide" data-id="${acc.user_id}" data-decision="pending">Reset</button>`;
+  } else {
+    actions =
+      `<button data-action="decide" data-id="${acc.user_id}" data-decision="keep" class="primary">Keep</button>` +
+      `<button data-action="decide" data-id="${acc.user_id}" data-decision="remove">Unfollow</button>`;
+  }
+
+  return `
+    <div class="history-row" data-row-id="${acc.user_id}">
+      <img class="history-avatar" src="${acc.avatar_url}" onerror="this.style.visibility='hidden'" />
+      <div class="history-info">
+        <div class="history-username">@${escapeHtml(acc.username)}</div>
+        <div class="history-meta">${when}</div>
+      </div>
+      <div class="history-actions">${actions}</div>
+    </div>
+  `;
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function loadHistory(reset) {
+  if (reset) {
+    historyOffset = 0;
+    document.getElementById("history-list").innerHTML = "";
+  }
+  try {
+    const params = new URLSearchParams({
+      q: historyQuery,
+      decision: historyFilter,
+      limit: HISTORY_PAGE_SIZE,
+      offset: historyOffset,
+    });
+    const { accounts, total } = await api(`/api/accounts?${params}`);
+    const list = document.getElementById("history-list");
+    list.insertAdjacentHTML("beforeend", accounts.map(historyRowHtml).join(""));
+    historyOffset += accounts.length;
+
+    document.getElementById("history-empty").classList.toggle("hidden", total > 0);
+    document.getElementById("btn-history-more").classList.toggle("hidden", historyOffset >= total);
+  } catch (err) {
+    showToast(err.message);
+  }
+}
+
+document.getElementById("history-search").addEventListener("input", (e) => {
+  historyQuery = e.target.value.trim();
+  clearTimeout(historySearchDebounce);
+  historySearchDebounce = setTimeout(() => loadHistory(true), 300);
+});
+
+document.getElementById("history-filter").addEventListener("change", (e) => {
+  historyFilter = e.target.value;
+  loadHistory(true);
+});
+
+document.getElementById("btn-history-more").addEventListener("click", () => loadHistory(false));
+
+document.getElementById("history-list").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-action]");
+  if (!btn) return;
+  const userId = btn.dataset.id;
+  const action = btn.dataset.action;
+  await withLoading(btn, "…", async () => {
+    try {
+      if (action === "refollow") {
+        await api(`/api/accounts/${userId}/refollow`, { method: "POST" });
+        showToast("Refollowed", false);
+      } else {
+        await api(`/api/accounts/${userId}/decision`, {
+          method: "POST",
+          body: { decision: btn.dataset.decision },
+        });
+        showToast("Updated", false);
+      }
+      loadHistory(true);
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+async function loadSettingsScreen() {
+  try {
+    const ig = await api("/api/ig/status");
+    document.getElementById("settings-ig-status").textContent = ig.authenticated
+      ? `Connected as @${ig.username}`
+      : "Not connected";
+  } catch (err) {
+    showToast(err.message);
+  }
+  updateThemeButtons();
+}
+
+document.getElementById("btn-ig-disconnect").addEventListener("click", async (e) => {
+  if (!confirm("Disconnect Instagram? You'll need to log in again to sync or unfollow anything.")) return;
+  await withLoading(e.currentTarget, "Disconnecting…", async () => {
+    try {
+      await api("/api/ig/logout", { method: "POST" });
+      showToast("Disconnected", false);
+      await boot();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+});
+
+document.getElementById("form-change-password").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector("button");
+  await withLoading(btn, "Saving…", async () => {
+    try {
+      await api("/api/settings/app-password", {
+        method: "POST",
+        body: {
+          current_password: document.getElementById("settings-current-password").value,
+          new_password: document.getElementById("settings-new-password").value,
+        },
+      });
+      e.target.reset();
+      showToast("Password changed", false);
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+});
+
+document.getElementById("btn-reset-data").addEventListener("click", async (e) => {
+  if (!confirm("This deletes every synced account and all keep/unfollow decisions from this app. " +
+    "It does NOT refollow anyone on Instagram. This can't be undone. Continue?")) return;
+  await withLoading(e.currentTarget, "Resetting…", async () => {
+    try {
+      await api("/api/settings/reset-data", { method: "POST" });
+      showToast("Data reset", false);
+      await boot();
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+});
+
+// Theme
+function applyTheme(theme) {
+  if (theme === "dark" || theme === "light") {
+    document.documentElement.setAttribute("data-theme", theme);
+  } else {
+    document.documentElement.removeAttribute("data-theme");
+  }
+  localStorage.setItem("mu-theme", theme);
+  updateThemeButtons();
+}
+
+function updateThemeButtons() {
+  const current = localStorage.getItem("mu-theme") || "system";
+  document.querySelectorAll(".theme-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.theme === current);
+  });
+}
+
+document.querySelectorAll(".theme-btn").forEach((btn) => {
+  btn.addEventListener("click", () => applyTheme(btn.dataset.theme));
 });
