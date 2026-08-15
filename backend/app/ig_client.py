@@ -73,7 +73,11 @@ def try_restore_session() -> bool:
     cl = _new_client()
     try:
         cl.load_settings(str(config.IG_SESSION_PATH))
-        cl.get_timeline_feed()  # cheap call to confirm the session is still valid
+        # instagrapi's dumped settings never include username (only cookies/
+        # auth tokens), so a client restored from disk has no .username until
+        # we fetch it — account_info() doubles as the cheap call that
+        # confirms the session is still valid.
+        cl.username = cl.account_info().username
         with _client_lock:
             _client = cl
         with auth_state.lock:
