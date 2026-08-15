@@ -361,27 +361,31 @@ function renderLastPost(el, state, lastPostAt) {
   else target.textContent = `Last post ${timeAgo(lastPostAt)}`;
 }
 
-// Only called once a card actually becomes the visible top card (not for the
-// buffered one sitting behind it) — keeps this to one Instagram lookup per
-// account actually viewed, not one per account merely prefetched.
+// Called both as a prefetch (for the buffered card sitting behind the top
+// one, so it's likely already resolved by the time it's promoted — no
+// "Checking…" flash) and again once a card actually becomes the visible top
+// card. The in-flight promise is cached on the card object itself so those
+// two calls for the same card share one request instead of firing twice —
+// still one Instagram lookup per account, just started earlier.
 async function loadLastPost(el, card) {
   if (card.last_post_checked) {
     renderLastPost(el, "value", card.last_post_at);
     return;
   }
+  if (!card._lastPostPromise) {
+    card._lastPostPromise = api(`/api/last-post/${card.user_id}`)
+      .catch(() => null)
+      .finally(() => { card._lastPostPromise = null; });
+  }
   renderLastPost(el, "loading");
-  try {
-    const result = await api(`/api/last-post/${card.user_id}`);
-    if (el.dataset.userId !== card.user_id) return; // card moved on before this resolved
-    if (result.checked) {
-      card.last_post_checked = true;
-      card.last_post_at = result.last_post_at;
-      renderLastPost(el, "value", result.last_post_at);
-    } else {
-      renderLastPost(el, "unknown");
-    }
-  } catch (_) {
-    if (el.dataset.userId === card.user_id) renderLastPost(el, "unknown");
+  const result = await card._lastPostPromise;
+  if (el.dataset.userId !== card.user_id) return; // card moved on before this resolved
+  if (result && result.checked) {
+    card.last_post_checked = true;
+    card.last_post_at = result.last_post_at;
+    renderLastPost(el, "value", result.last_post_at);
+  } else {
+    renderLastPost(el, "unknown");
   }
 }
 
@@ -402,27 +406,28 @@ function renderFollowsBack(el, state, followsBack) {
   }
 }
 
-// Same lazy-once-per-account pattern as loadLastPost, kept as a separate
-// call so each signal is independently cached and one failing doesn't block
-// the other.
+// Same prefetch-and-share-in-flight-promise pattern as loadLastPost, kept as
+// a separate call so each signal is independently cached and one failing
+// doesn't block the other.
 async function loadFollowsBack(el, card) {
   if (card.follows_back_checked) {
     renderFollowsBack(el, "value", card.follows_back);
     return;
   }
+  if (!card._followsBackPromise) {
+    card._followsBackPromise = api(`/api/follows-back/${card.user_id}`)
+      .catch(() => null)
+      .finally(() => { card._followsBackPromise = null; });
+  }
   renderFollowsBack(el, "loading");
-  try {
-    const result = await api(`/api/follows-back/${card.user_id}`);
-    if (el.dataset.userId !== card.user_id) return; // card moved on before this resolved
-    if (result.checked) {
-      card.follows_back_checked = true;
-      card.follows_back = result.follows_back;
-      renderFollowsBack(el, "value", result.follows_back);
-    } else {
-      renderFollowsBack(el, "unknown");
-    }
-  } catch (_) {
-    if (el.dataset.userId === card.user_id) renderFollowsBack(el, "unknown");
+  const result = await card._followsBackPromise;
+  if (el.dataset.userId !== card.user_id) return; // card moved on before this resolved
+  if (result && result.checked) {
+    card.follows_back_checked = true;
+    card.follows_back = result.follows_back;
+    renderFollowsBack(el, "value", result.follows_back);
+  } else {
+    renderFollowsBack(el, "unknown");
   }
 }
 
@@ -440,6 +445,11 @@ async function initQueue() {
   if (nextCard) {
     nextEl = makeCardEl(nextCard, "behind");
     cardStack.appendChild(nextEl);
+    // Prefetch for the buffered card while it's still behind the current
+    // one, so it's usually already resolved by the time it's promoted —
+    // still one lookup per account, just started a swipe earlier.
+    loadLastPost(nextEl, nextCard);
+    loadFollowsBack(nextEl, nextCard);
   }
   topEl = makeCardEl(topCard, "top");
   topEl.addEventListener("pointerdown", onPointerDown);
@@ -485,6 +495,8 @@ async function refillNext() {
       nextCard = fresh;
       nextEl = makeCardEl(fresh, "behind");
       cardStack.insertBefore(nextEl, topEl);
+      loadLastPost(nextEl, nextCard);
+      loadFollowsBack(nextEl, nextCard);
     }
   } finally {
     refilling = false;
