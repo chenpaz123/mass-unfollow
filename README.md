@@ -143,7 +143,11 @@ Access policy so only you can reach it:
 3. **Sync following list** — pulls everyone you follow, with a live progress
    count. Takes a few minutes for a large following count; only needs to be
    done once (use **Resync following list** on the Queue tab anytime to pick
-   up new follows — existing decisions are preserved).
+   up new follows — existing decisions are preserved). If it's ever
+   interrupted partway (a server restart, a network blip), it resumes from
+   where it left off automatically instead of starting over — checkpointed
+   after every page (~200 accounts), so at most one page's worth of progress
+   is ever at risk.
 4. **Swipe** through your following list — see [The four tabs](#the-four-tabs)
    above.
 5. On the **Queue** tab, tune the daily cap / delay if you want, and hit

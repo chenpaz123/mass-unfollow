@@ -25,21 +25,34 @@ _sync_task: asyncio.Task | None = None
 
 @app.on_event("startup")
 async def on_startup():
+    global _sync_task
     db.init_db()
-    # The sync task only ever lives in memory (_sync_task) -- it cannot
-    # survive a restart. If sync_state was left "running" by an unclean
-    # shutdown (e.g. restarting to clear a hung request), nothing will ever
-    # move it out of that state on its own: sync_start() would keep treating
-    # a sync as already in progress forever, and the frontend would keep
-    # showing a permanently frozen progress bar. Reconcile it here so a
-    # fresh sync can actually be started.
-    if db.get_sync_state().get("status") == "running":
-        db.set_sync_status("error", error="Interrupted by a server restart — just try syncing again.")
     try:
         if ig_client.try_restore_session():
             log.info("Restored previous Instagram session")
     except Exception:
         log.exception("Failed restoring saved session")
+
+    # The sync task only ever lives in memory (_sync_task) -- it cannot
+    # survive a restart. If sync_state was left "running" by an unclean
+    # shutdown (e.g. a deploy landing mid-sync), nothing will ever move it
+    # out of that state on its own. A large following list can take several
+    # minutes to sync and restarts during active development happen often,
+    # so rather than just erroring out and losing all progress, resume
+    # automatically from the last-saved page cursor (see _sync_worker) if
+    # Instagram is still authenticated -- only fall back to a plain
+    # "interrupted" error if it isn't (nothing to resume with, needs a
+    # human to log back in first).
+    if db.get_sync_state().get("status") == "running":
+        if ig_client.is_authenticated():
+            log.info("Resuming interrupted sync")
+            _sync_task = asyncio.create_task(_run_sync())
+        else:
+            db.set_sync_status(
+                "error",
+                error="Interrupted by a server restart — log back into Instagram, then try syncing again.",
+            )
+
     asyncio.create_task(worker.worker_loop())
 
 
@@ -196,31 +209,40 @@ def ig_logout():
 # ---------------------------------------------------------------------------
 
 
-SYNC_FLUSH_EVERY = 50
-
-
 def _sync_worker() -> tuple[int, int]:
-    """Runs in a worker thread. Paginates through the following list,
-    flushing batches to the DB as they arrive so progress is real (shown
-    to the user as it happens) and isn't lost if something fails partway."""
+    """Runs in a worker thread. Paginates through the following list, one
+    Instagram page (~200 accounts) at a time, upserting and checkpointing
+    the resume cursor after each page so progress is real (shown to the
+    user as it happens) and survives an interruption -- a full sync of a
+    large following list takes minutes, and restarting mid-sync (e.g. a
+    deploy) used to always lose everything and start over from scratch.
+
+    Resumes from the last-saved page cursor if one exists (an interrupted
+    sync); resuming re-fetches that one page again (harmless -- upserts are
+    idempotent and never overwrite an existing decision) rather than risk
+    skipping any accounts.
+    """
+    state = db.get_sync_state()
+    start_cursor = state.get("resume_cursor") or ""
+    fetched = state.get("resume_fetched") or 0
+
     try:
         total = ig_client.get_own_following_count()
     except Exception:
         total = 0
-    db.set_sync_status("running", fetched_count=0, total_count=total)
+    db.set_sync_status("running", fetched_count=fetched, total_count=total)
 
-    batch = []
-    fetched = 0
-    for row in ig_client.iter_own_following():
-        row["sort_order"] = float(fetched)
-        batch.append(row)
-        fetched += 1
-        if len(batch) >= SYNC_FLUSH_EVERY:
-            db.upsert_accounts(batch)
-            batch = []
-            db.set_sync_status("running", fetched_count=fetched, total_count=total)
-    if batch:
+    for page, next_cursor in ig_client.iter_own_following_pages(start_cursor=start_cursor):
+        batch = []
+        for row in page:
+            row["sort_order"] = float(fetched)
+            batch.append(row)
+            fetched += 1
         db.upsert_accounts(batch)
+        # Checkpoint only AFTER this page's upserts are confirmed committed --
+        # advancing resume_cursor any earlier risks skipping accounts if the
+        # process dies mid-page.
+        db.set_sync_status("running", fetched_count=fetched, total_count=total, resume_cursor=next_cursor, resume_fetched=fetched)
     return fetched, total
 
 
@@ -236,9 +258,15 @@ async def _run_sync():
         # overwriting it with `fetched`, so that gap stays visible in the UI
         # (and tells the user a resync may still be worth trying) rather than
         # silently reporting every sync as fully complete.
-        db.set_sync_status("done", fetched_count=fetched, total_count=max(total, fetched))
+        db.set_sync_status(
+            "done", fetched_count=fetched, total_count=max(total, fetched), resume_cursor="", resume_fetched=0
+        )
     except Exception as e:
         log.exception("Sync failed")
+        # Deliberately NOT touching resume_cursor/resume_fetched here -- keep
+        # whatever _sync_worker last checkpointed so the next attempt (manual
+        # retry, or an auto-resume on the next restart) continues from there
+        # instead of starting over.
         db.set_sync_status("error", error=str(e))
 
 

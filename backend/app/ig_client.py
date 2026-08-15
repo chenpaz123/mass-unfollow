@@ -293,14 +293,34 @@ def _to_account_dict(u) -> dict:
     }
 
 
-def iter_own_following():
-    """Yields following accounts one at a time as they're paginated in.
+def iter_own_following_pages(start_cursor: str = ""):
+    """Yields (accounts_in_page, next_cursor) as pages are fetched.
+    next_cursor is the cursor for the page AFTER this one -- callers should
+    only persist it as a resume point once this page's accounts are
+    confirmed durably saved, so an interruption always resumes by
+    re-fetching the last (possibly not-yet-saved) page rather than skipping
+    it. Re-fetching an already-saved page on resume is harmless (upserts
+    are idempotent and never overwrite an existing decision); the point is
+    resuming must never SKIP a page.
+
+    Bypasses instagrapi's iter_user_following_v1() convenience wrapper
+    (which always starts from an empty cursor) to drive pagination directly,
+    since a full sync of a large following list takes minutes and a server
+    restart mid-sync (e.g. a deploy) would otherwise always lose all
+    progress and have to start over from scratch.
 
     Blocking/sync generator — call from a worker thread, not the event loop.
     """
     cl = get_client()
-    for u in cl.iter_user_following_v1(cl.user_id):
-        yield _to_account_dict(u)
+    cursor = start_cursor
+    while True:
+        users, next_cursor = cl.user_following_v1_chunk(cl.user_id, max_id=cursor)
+        if not users:
+            return
+        yield [_to_account_dict(u) for u in users], next_cursor
+        if not next_cursor or next_cursor == cursor:
+            return
+        cursor = next_cursor
 
 
 def unfollow(user_id: str):

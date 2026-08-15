@@ -107,6 +107,12 @@ def init_db():
         if "fail_count" not in existing_cols:
             conn.execute("ALTER TABLE accounts ADD COLUMN fail_count INTEGER NOT NULL DEFAULT 0")
 
+        existing_sync_cols = {r["name"] for r in conn.execute("PRAGMA table_info(sync_state)")}
+        if "resume_cursor" not in existing_sync_cols:
+            conn.execute("ALTER TABLE sync_state ADD COLUMN resume_cursor TEXT NOT NULL DEFAULT ''")
+        if "resume_fetched" not in existing_sync_cols:
+            conn.execute("ALTER TABLE sync_state ADD COLUMN resume_fetched INTEGER NOT NULL DEFAULT 0")
+
         conn.commit()
 
 
@@ -137,7 +143,14 @@ def randomize_sort_order():
         conn.commit()
 
 
-def set_sync_status(status: str, fetched_count: int = None, total_count: int = None, error: str = None):
+def set_sync_status(
+    status: str,
+    fetched_count: int = None,
+    total_count: int = None,
+    error: str = None,
+    resume_cursor: str = None,
+    resume_fetched: int = None,
+):
     fields = ["status = ?"]
     values = [status]
     if fetched_count is not None:
@@ -149,6 +162,12 @@ def set_sync_status(status: str, fetched_count: int = None, total_count: int = N
     if error is not None:
         fields.append("last_error = ?")
         values.append(error)
+    if resume_cursor is not None:
+        fields.append("resume_cursor = ?")
+        values.append(resume_cursor)
+    if resume_fetched is not None:
+        fields.append("resume_fetched = ?")
+        values.append(resume_fetched)
     if status == "done":
         fields.append("last_synced_at = ?")
         values.append(time.time())
