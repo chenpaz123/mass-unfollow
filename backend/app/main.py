@@ -23,6 +23,15 @@ _sync_task: asyncio.Task | None = None
 @app.on_event("startup")
 async def on_startup():
     db.init_db()
+    # The sync task only ever lives in memory (_sync_task) -- it cannot
+    # survive a restart. If sync_state was left "running" by an unclean
+    # shutdown (e.g. restarting to clear a hung request), nothing will ever
+    # move it out of that state on its own: sync_start() would keep treating
+    # a sync as already in progress forever, and the frontend would keep
+    # showing a permanently frozen progress bar. Reconcile it here so a
+    # fresh sync can actually be started.
+    if db.get_sync_state().get("status") == "running":
+        db.set_sync_status("error", error="Interrupted by a server restart — just try syncing again.")
     try:
         if ig_client.try_restore_session():
             log.info("Restored previous Instagram session")
