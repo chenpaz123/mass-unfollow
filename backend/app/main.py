@@ -253,6 +253,8 @@ def _card(row: dict) -> dict:
         "is_private": bool(row["is_private"]),
         "is_verified": bool(row["is_verified"]),
         "avatar_url": f"/api/avatar/{row['user_id']}",
+        "last_post_checked": bool(row["last_post_checked"]),
+        "last_post_at": row["last_post_at"],
     }
 
 
@@ -380,6 +382,30 @@ async def avatar(user_id: str):
         raise HTTPException(status_code=404)
     path.write_bytes(content)
     return Response(content=content, media_type="image/jpeg")
+
+
+@app.get("/api/last-post/{user_id}", dependencies=[Depends(require_auth)])
+async def last_post(user_id: str):
+    """Lazily fetched and cached, like avatars — one Instagram lookup per
+    account, ever, the first time its card is actually viewed. Soft-fails
+    (200 with checked=false) instead of raising, since this is a nice-to-have
+    signal for the swipe screen, not something that should surface as an
+    error toast if it can't be determined right now."""
+    account = db.get_account(user_id)
+    if not account:
+        raise HTTPException(status_code=404)
+    if account["last_post_checked"]:
+        return {"checked": True, "last_post_at": account["last_post_at"]}
+    if not ig_client.is_authenticated():
+        return {"checked": False, "error": "not_authenticated"}
+    async with ig_client.ig_call_lock:
+        try:
+            ts = await asyncio.to_thread(ig_client.get_last_post_timestamp, user_id)
+        except Exception as e:
+            log.warning("last-post lookup failed for %s: %s", user_id, e)
+            return {"checked": False, "error": str(e)}
+    db.set_last_post_info(user_id, ts)
+    return {"checked": True, "last_post_at": ts}
 
 
 # ---------------------------------------------------------------------------

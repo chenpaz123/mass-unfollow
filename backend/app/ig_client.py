@@ -246,6 +246,17 @@ def unfollow(user_id: str):
     cl.user_unfollow(int(user_id))
 
 
+def get_last_post_timestamp(user_id: str) -> float | None:
+    """Unix timestamp of the account's most recent post, or None if they
+    have no posts (or we couldn't see any — e.g. a private account with no
+    visible media). Only fetches one media item, to keep this cheap."""
+    cl = get_client()
+    medias = cl.user_medias(int(user_id), amount=1)
+    if not medias:
+        return None
+    return medias[0].taken_at.timestamp()
+
+
 def refollow(user_id: str):
     cl = get_client()
     cl.user_follow(int(user_id))

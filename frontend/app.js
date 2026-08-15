@@ -282,6 +282,7 @@ let refilling = false;
 function makeCardEl(card, roleClass) {
   const el = document.createElement("div");
   el.className = `swipe-card ${roleClass}`;
+  el.dataset.userId = card.user_id;
   el.innerHTML = `
     <div class="stamp keep">KEEP</div>
     <div class="stamp remove">UNFOLLOW</div>
@@ -289,6 +290,7 @@ function makeCardEl(card, roleClass) {
     <div class="username"></div>
     <div class="full-name"></div>
     <div class="badges"></div>
+    <div class="last-post"></div>
     <a class="profile-link" target="_blank" rel="noopener noreferrer">View on Instagram ↗</a>
   `;
   fillCardEl(el, card);
@@ -306,6 +308,49 @@ function fillCardEl(el, card) {
   if (card.is_private) badges.innerHTML += '<span class="badge">Private</span>';
   if (card.is_verified) badges.innerHTML += '<span class="badge">Verified</span>';
   el.querySelector(".profile-link").href = `https://www.instagram.com/${encodeURIComponent(card.username)}/`;
+  el.querySelector(".last-post").textContent = "";
+}
+
+function timeAgo(unixSeconds) {
+  const days = Math.floor(Math.max(0, Date.now() / 1000 - unixSeconds) / 86400);
+  if (days < 1) return "today";
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30.44);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(days / 365.25)}y ago`;
+}
+
+function renderLastPost(el, state, lastPostAt) {
+  const target = el.querySelector(".last-post");
+  target.classList.toggle("pending", state === "loading");
+  if (state === "loading") target.textContent = "Checking last post…";
+  else if (state === "unknown") target.textContent = "Last post: unknown";
+  else if (lastPostAt == null) target.textContent = "No posts found";
+  else target.textContent = `Last post ${timeAgo(lastPostAt)}`;
+}
+
+// Only called once a card actually becomes the visible top card (not for the
+// buffered one sitting behind it) — keeps this to one Instagram lookup per
+// account actually viewed, not one per account merely prefetched.
+async function loadLastPost(el, card) {
+  if (card.last_post_checked) {
+    renderLastPost(el, "value", card.last_post_at);
+    return;
+  }
+  renderLastPost(el, "loading");
+  try {
+    const result = await api(`/api/last-post/${card.user_id}`);
+    if (el.dataset.userId !== card.user_id) return; // card moved on before this resolved
+    if (result.checked) {
+      card.last_post_checked = true;
+      card.last_post_at = result.last_post_at;
+      renderLastPost(el, "value", result.last_post_at);
+    } else {
+      renderLastPost(el, "unknown");
+    }
+  } catch (_) {
+    if (el.dataset.userId === card.user_id) renderLastPost(el, "unknown");
+  }
 }
 
 async function initQueue() {
@@ -326,6 +371,7 @@ async function initQueue() {
   topEl = makeCardEl(topCard, "top");
   topEl.addEventListener("pointerdown", onPointerDown);
   cardStack.appendChild(topEl);
+  loadLastPost(topEl, topCard);
   updateRemaining();
 }
 
@@ -372,6 +418,7 @@ async function flyOut(decision) {
     topEl.classList.remove("behind");
     topEl.classList.add("top");
     topEl.addEventListener("pointerdown", onPointerDown);
+    loadLastPost(topEl, topCard);
   } else {
     swipeEmpty.classList.remove("hidden");
   }

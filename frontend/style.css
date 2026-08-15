@@ -172,6 +172,14 @@ button { transition: transform 0.08s ease, opacity 0.15s ease; }
 .badges { margin-top: 10px; display: flex; gap: 6px; }
 .badge { font-size: 0.72rem; padding: 2px 8px; border-radius: 20px; background: var(--panel-2); color: var(--muted); }
 
+.last-post {
+  margin-top: 12px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  min-height: 1.2em;
+}
+.last-post.pending { opacity: 0.6; }
+
 .profile-link {
   margin-top: 18px;
   font-size: 0.82rem;

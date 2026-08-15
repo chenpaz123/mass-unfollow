@@ -84,6 +84,15 @@ def init_db():
             (config.DEFAULT_DAILY_CAP, config.DEFAULT_MIN_DELAY_SEC, config.DEFAULT_MAX_DELAY_SEC),
         )
         conn.execute("INSERT OR IGNORE INTO sync_state (id) VALUES (1)")
+
+        # Migrations for columns added after accounts already existed in the
+        # wild — CREATE TABLE IF NOT EXISTS above is a no-op on those DBs.
+        existing_cols = {r["name"] for r in conn.execute("PRAGMA table_info(accounts)")}
+        if "last_post_at" not in existing_cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN last_post_at REAL")
+        if "last_post_checked" not in existing_cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN last_post_checked INTEGER NOT NULL DEFAULT 0")
+
         conn.commit()
 
 
@@ -211,6 +220,17 @@ def get_account(user_id: str) -> dict | None:
     with db_lock() as conn:
         row = conn.execute("SELECT * FROM accounts WHERE user_id = ?", (user_id,)).fetchone()
         return dict(row) if row else None
+
+
+def set_last_post_info(user_id: str, last_post_at: float | None):
+    """Cache a fetched last-post timestamp (or None for "confirmed no posts")
+    so the same account never triggers a second Instagram lookup."""
+    with db_lock() as conn:
+        conn.execute(
+            "UPDATE accounts SET last_post_at = ?, last_post_checked = 1 WHERE user_id = ?",
+            (last_post_at, user_id),
+        )
+        conn.commit()
 
 
 def get_worker_state() -> dict:
