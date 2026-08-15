@@ -207,6 +207,13 @@ def queue_next():
     return {"done": False, "card": _card(row)}
 
 
+@app.get("/api/queue/peek", dependencies=[Depends(require_auth)])
+def queue_peek(limit: int = 2):
+    limit = max(1, min(limit, 10))
+    rows = db.peek_pending(limit=limit)
+    return {"cards": [_card(r) for r in rows]}
+
+
 class DecisionBody(BaseModel):
     user_id: str
     decision: str  # "keep" | "remove"

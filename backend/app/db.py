@@ -143,6 +143,16 @@ def get_next_pending() -> dict | None:
         return dict(row) if row else None
 
 
+def peek_pending(limit: int = 2) -> list[dict]:
+    """Non-mutating look at the next N pending accounts, in queue order."""
+    with db_lock() as conn:
+        rows = conn.execute(
+            "SELECT * FROM accounts WHERE decision = 'pending' ORDER BY sort_order ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def record_decision(user_id: str, decision: str):
     now = time.time()
     with db_lock() as conn:

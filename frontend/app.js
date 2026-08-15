@@ -46,7 +46,7 @@ async function boot() {
     return;
   }
   showScreen("screen-swipe");
-  loadNextCard();
+  initQueue();
 }
 
 boot().catch((e) => console.error(e));
@@ -212,14 +212,17 @@ async function pollSync() {
   renderSyncScreen(state);
 }
 
-document.getElementById("btn-sync-start").addEventListener("click", async () => {
-  await api("/api/sync/start", { method: "POST" });
+async function startSync() {
+  showScreen("screen-sync");
   renderSyncScreen({ status: "running" });
-});
+  await api("/api/sync/start", { method: "POST" });
+}
+
+document.getElementById("btn-sync-start").addEventListener("click", startSync);
 
 document.getElementById("btn-go-swipe").addEventListener("click", () => {
   showScreen("screen-swipe");
-  loadNextCard();
+  initQueue();
 });
 
 // ---------------------------------------------------------------------------
@@ -228,13 +231,18 @@ document.getElementById("btn-go-swipe").addEventListener("click", () => {
 
 const cardStack = document.getElementById("card-stack");
 const swipeEmpty = document.getElementById("swipe-empty");
-let cardEl = null;
-let currentCard = null;
-let dragState = null;
 
-function buildCardEl() {
+// Two-card buffer: topEl/topCard is the live, draggable card; nextEl/nextCard
+// sits visually behind it (Tinder-style peek) and is promoted instantly when
+// the top card is swiped, so there's never a fetch delay for the reveal.
+let topEl = null, topCard = null;
+let nextEl = null, nextCard = null;
+let dragState = null;
+let refilling = false;
+
+function makeCardEl(card, roleClass) {
   const el = document.createElement("div");
-  el.className = "swipe-card top";
+  el.className = `swipe-card ${roleClass}`;
   el.innerHTML = `
     <div class="stamp keep">KEEP</div>
     <div class="stamp remove">UNFOLLOW</div>
@@ -244,43 +252,41 @@ function buildCardEl() {
     <div class="badges"></div>
     <a class="profile-link" target="_blank" rel="noopener noreferrer">View on Instagram ↗</a>
   `;
-  el.addEventListener("pointerdown", onPointerDown);
+  fillCardEl(el, card);
   return el;
 }
 
-function renderCard(card) {
-  currentCard = card;
-  swipeEmpty.classList.add("hidden");
-  if (!cardEl) {
-    cardEl = buildCardEl();
-    cardStack.appendChild(cardEl);
-  }
-  cardEl.style.transition = "none";
-  cardEl.style.transform = "translate(0,0) rotate(0)";
-  cardEl.style.opacity = "1";
-  cardEl.querySelector(".stamp.keep").style.opacity = 0;
-  cardEl.querySelector(".stamp.remove").style.opacity = 0;
-  cardEl.querySelector(".avatar").src = card.avatar_url;
-  cardEl.querySelector(".avatar").onerror = (e) => (e.target.style.visibility = "hidden");
-  cardEl.querySelector(".username").textContent = "@" + card.username;
-  cardEl.querySelector(".full-name").textContent = card.full_name || "";
-  const badges = cardEl.querySelector(".badges");
+function fillCardEl(el, card) {
+  el.querySelector(".avatar").src = card.avatar_url;
+  el.querySelector(".avatar").style.visibility = "visible";
+  el.querySelector(".avatar").onerror = (e) => (e.target.style.visibility = "hidden");
+  el.querySelector(".username").textContent = "@" + card.username;
+  el.querySelector(".full-name").textContent = card.full_name || "";
+  const badges = el.querySelector(".badges");
   badges.innerHTML = "";
   if (card.is_private) badges.innerHTML += '<span class="badge">Private</span>';
   if (card.is_verified) badges.innerHTML += '<span class="badge">Verified</span>';
-  cardEl.querySelector(".profile-link").href = `https://www.instagram.com/${encodeURIComponent(card.username)}/`;
+  el.querySelector(".profile-link").href = `https://www.instagram.com/${encodeURIComponent(card.username)}/`;
 }
 
-function showEmptyState() {
-  currentCard = null;
-  if (cardEl) { cardEl.remove(); cardEl = null; }
-  swipeEmpty.classList.remove("hidden");
-}
+async function initQueue() {
+  const { cards } = await api("/api/queue/peek?limit=2");
+  if (topEl) topEl.remove();
+  if (nextEl) nextEl.remove();
+  topEl = nextEl = null;
+  topCard = cards[0] || null;
+  nextCard = cards[1] || null;
 
-async function loadNextCard() {
-  const result = await api("/api/queue/next");
-  if (result.done) showEmptyState();
-  else renderCard(result.card);
+  swipeEmpty.classList.toggle("hidden", !!topCard);
+  if (!topCard) { updateRemaining(); return; }
+
+  if (nextCard) {
+    nextEl = makeCardEl(nextCard, "behind");
+    cardStack.appendChild(nextEl);
+  }
+  topEl = makeCardEl(topCard, "top");
+  topEl.addEventListener("pointerdown", onPointerDown);
+  cardStack.appendChild(topEl);
   updateRemaining();
 }
 
@@ -289,22 +295,53 @@ async function updateRemaining() {
   document.getElementById("swipe-remaining").textContent = `${stats.pending} remaining`;
 }
 
-async function applyDecision(decision) {
-  if (!currentCard) return;
-  const userId = currentCard.user_id;
-  const result = await api("/api/decision", { method: "POST", body: { user_id: userId, decision } });
-  if (result.done) showEmptyState();
-  else renderCard(result.card);
-  updateRemaining();
+async function refillNext() {
+  if (refilling || !topCard || nextCard) return;
+  refilling = true;
+  try {
+    const { cards } = await api("/api/queue/peek?limit=2");
+    const fresh = cards.find((c) => c.user_id !== topCard.user_id) || null;
+    if (fresh && topCard && !nextCard) {
+      nextCard = fresh;
+      nextEl = makeCardEl(fresh, "behind");
+      cardStack.insertBefore(nextEl, topEl);
+    }
+  } finally {
+    refilling = false;
+  }
 }
 
-function flyOut(decision) {
-  if (!cardEl || !currentCard) return;
+async function flyOut(decision) {
+  if (!topEl || !topCard) return;
+  const outgoingEl = topEl;
+  const outgoingCard = topCard;
+  outgoingEl.removeEventListener("pointerdown", onPointerDown);
+
   const dx = decision === "keep" ? 600 : -600;
-  cardEl.style.transition = "transform 0.35s ease, opacity 0.35s ease";
-  cardEl.style.transform = `translate(${dx}px, -40px) rotate(${dx / 12}deg)`;
-  cardEl.style.opacity = "0";
-  applyDecision(decision);
+  outgoingEl.style.transition = "transform 0.35s ease, opacity 0.35s ease";
+  outgoingEl.style.transform = `translate(${dx}px, -40px) rotate(${dx / 12}deg)`;
+  outgoingEl.style.opacity = "0";
+  setTimeout(() => outgoingEl.remove(), 360);
+
+  // Promote the buffered next card instantly — no fetch, no delay.
+  topEl = nextEl;
+  topCard = nextCard;
+  nextEl = null;
+  nextCard = null;
+  if (topEl) {
+    topEl.style.transition = "transform 0.25s ease, opacity 0.25s ease";
+    topEl.classList.remove("behind");
+    topEl.classList.add("top");
+    topEl.addEventListener("pointerdown", onPointerDown);
+  } else {
+    swipeEmpty.classList.remove("hidden");
+  }
+
+  api("/api/decision", { method: "POST", body: { user_id: outgoingCard.user_id, decision } }).catch((e) =>
+    console.error("Failed to record decision:", e)
+  );
+  updateRemaining();
+  refillNext();
 }
 
 document.getElementById("btn-keep").addEventListener("click", () => flyOut("keep"));
@@ -312,7 +349,7 @@ document.getElementById("btn-remove").addEventListener("click", () => flyOut("re
 
 document.getElementById("btn-undo").addEventListener("click", async () => {
   const result = await api("/api/decision/undo", { method: "POST" });
-  if (result.user_id) await loadNextCard();
+  if (result.user_id) await initQueue();
 });
 
 document.addEventListener("keydown", (e) => {
@@ -322,40 +359,40 @@ document.addEventListener("keydown", (e) => {
 });
 
 function onPointerDown(e) {
-  if (!cardEl) return;
+  if (!topEl) return;
   if (e.target.closest("a")) return; // let the "View on Instagram" link work normally
-  cardEl.setPointerCapture(e.pointerId);
+  topEl.setPointerCapture(e.pointerId);
   dragState = { startX: e.clientX, startY: e.clientY };
-  cardEl.classList.add("dragging");
-  cardEl.style.transition = "none";
-  cardEl.addEventListener("pointermove", onPointerMove);
-  cardEl.addEventListener("pointerup", onPointerUp);
+  topEl.classList.add("dragging");
+  topEl.style.transition = "none";
+  topEl.addEventListener("pointermove", onPointerMove);
+  topEl.addEventListener("pointerup", onPointerUp);
 }
 
 function onPointerMove(e) {
-  if (!dragState || !cardEl) return;
+  if (!dragState || !topEl) return;
   const dx = e.clientX - dragState.startX;
   const dy = e.clientY - dragState.startY;
-  cardEl.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx / 20}deg)`;
-  cardEl.querySelector(".stamp.keep").style.opacity = Math.max(0, Math.min(1, dx / 100));
-  cardEl.querySelector(".stamp.remove").style.opacity = Math.max(0, Math.min(1, -dx / 100));
+  topEl.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx / 20}deg)`;
+  topEl.querySelector(".stamp.keep").style.opacity = Math.max(0, Math.min(1, dx / 100));
+  topEl.querySelector(".stamp.remove").style.opacity = Math.max(0, Math.min(1, -dx / 100));
 }
 
 function onPointerUp(e) {
-  if (!dragState || !cardEl) return;
+  if (!dragState || !topEl) return;
   const dx = e.clientX - dragState.startX;
-  cardEl.classList.remove("dragging");
-  cardEl.removeEventListener("pointermove", onPointerMove);
-  cardEl.removeEventListener("pointerup", onPointerUp);
+  topEl.classList.remove("dragging");
+  topEl.removeEventListener("pointermove", onPointerMove);
+  topEl.removeEventListener("pointerup", onPointerUp);
   dragState = null;
   const threshold = 110;
   if (dx > threshold) flyOut("keep");
   else if (dx < -threshold) flyOut("remove");
   else {
-    cardEl.style.transition = "transform 0.25s ease";
-    cardEl.style.transform = "translate(0,0) rotate(0)";
-    cardEl.querySelector(".stamp.keep").style.opacity = 0;
-    cardEl.querySelector(".stamp.remove").style.opacity = 0;
+    topEl.style.transition = "transform 0.25s ease";
+    topEl.style.transform = "translate(0,0) rotate(0)";
+    topEl.querySelector(".stamp.keep").style.opacity = 0;
+    topEl.querySelector(".stamp.remove").style.opacity = 0;
   }
 }
 
@@ -364,7 +401,7 @@ document.getElementById("btn-go-review-2").addEventListener("click", () => openR
 document.getElementById("btn-back-swipe").addEventListener("click", () => {
   stopWorkerPolling();
   showScreen("screen-swipe");
-  loadNextCard();
+  initQueue();
 });
 
 // ---------------------------------------------------------------------------
@@ -411,7 +448,18 @@ async function refreshReview() {
 
   document.getElementById("btn-worker-start").classList.toggle("hidden", wstate.enabled);
   document.getElementById("btn-worker-stop").classList.toggle("hidden", !wstate.enabled);
+
+  const sync = await api("/api/sync/status");
+  const lastSyncedEl = document.getElementById("last-synced");
+  lastSyncedEl.textContent = sync.last_synced_at
+    ? `Last synced ${new Date(sync.last_synced_at * 1000).toLocaleString()}`
+    : "";
 }
+
+document.getElementById("btn-resync").addEventListener("click", () => {
+  stopWorkerPolling();
+  startSync();
+});
 
 document.getElementById("btn-save-worker-config").addEventListener("click", async () => {
   await api("/api/worker/config", {

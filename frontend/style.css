@@ -123,7 +123,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   box-shadow: 0 12px 32px rgba(0,0,0,0.4);
 }
 .swipe-card.dragging { cursor: grabbing; transition: none; }
-.swipe-card.behind { transform: scale(0.95) translateY(10px); opacity: 0.6; z-index: 0; }
+.swipe-card.behind { transform: scale(0.96) translateY(22px); opacity: 0.6; z-index: 0; pointer-events: none; }
 .swipe-card.top { z-index: 1; }
 
 .avatar {
