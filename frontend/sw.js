@@ -39,3 +39,34 @@ self.addEventListener("fetch", (event) => {
     })
   );
 });
+
+// Push notifications — currently just the unfollow worker auto-pausing
+// because Instagram signaled a rate limit (see backend/app/worker.py).
+self.addEventListener("push", (event) => {
+  let data = { title: "Mass Unfollow", body: "" };
+  try {
+    data = event.data.json();
+  } catch (_) {
+    // Malformed/empty payload — fall back to the default above rather than
+    // dropping the notification silently.
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || "Mass Unfollow", {
+      body: data.body || "",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-32.png",
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: "window" }).then((clientList) => {
+      for (const client of clientList) {
+        if ("focus" in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow("/");
+    })
+  );
+});

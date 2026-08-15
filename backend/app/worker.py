@@ -11,7 +11,7 @@ from instagrapi.exceptions import (
     SentryBlock,
 )
 
-from . import db, ig_client
+from . import db, ig_client, notify
 
 log = logging.getLogger("mass-unfollow.worker")
 
@@ -82,6 +82,11 @@ async def _tick():
                 "Wait a while before resuming.",
             )
             log.warning("Rate-limit signal from Instagram, auto-pausing: %s", e)
+            await asyncio.to_thread(
+                notify.send_push,
+                "Unfollow worker paused",
+                "Instagram signaled you're doing this too fast. Wait a while before resuming from the Queue tab.",
+            )
             return
         except Exception as e:
             db.bump_account_fail_count(target["user_id"])

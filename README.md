@@ -29,7 +29,8 @@ turn them off or push them to extremes (see [Safe pacing](#safe-pacing) below).
   clear the backlog — pause/resume any time from the Queue tab. If Instagram
   ever signals it directly (a rate-limit or "please wait" response, not just
   a generic error), the worker **pauses itself automatically** rather than
-  quietly retrying at the normal pace — check the Queue tab for why before
+  quietly retrying at the normal pace, and sends a push notification if
+  you've enabled them in Settings — check the Queue tab for why before
   resuming. A single account that keeps failing for any other reason (already
   gone, some IG-side quirk) gets skipped after 3 attempts instead of jamming
   the rest of the queue behind it — visible as "skipped after repeated
@@ -65,10 +66,13 @@ turn them off or push them to extremes (see [Safe pacing](#safe-pacing) below).
   unfollowed, and **Refollow** for anything this app already unfollowed (calls
   Instagram's follow API for real and clears the record).
 - **Settings** — see your connected Instagram username and disconnect it,
-  change the app password, switch theme, **export to CSV** (username,
-  decision, and timestamps for everything you've reviewed), and a danger-zone
-  **Reset all data** (wipes this app's local records only — never touches
-  Instagram, already-unfollowed accounts stay unfollowed).
+  change the app password, switch theme, **enable notifications** (a real
+  push notification — arrives even if the app isn't open — if the unfollow
+  worker ever auto-pauses itself; see [Notes / limits](#notes--limits)),
+  **export to CSV** (username, decision, and timestamps for everything you've
+  reviewed), and a danger-zone **Reset all data** (wipes this app's local
+  records only — never touches Instagram, already-unfollowed accounts stay
+  unfollowed).
 
 ## 1. Run it on your server
 
@@ -183,6 +187,10 @@ Instagram doesn't publish official limits, but community-tested consensus
   (this forgets your Instagram session and all decisions) — or use
   **Reset all data** in Settings for just the account records, keeping your
   Instagram session connected.
+- Push notifications need a real HTTPS origin (already true here via the
+  Cloudflare Tunnel) and use a key pair generated once on first run and saved
+  to `./data` — deleting `./data` means re-enabling notifications afterward
+  (existing subscriptions are tied to the old key and silently stop working).
 
 ## Updating
 

@@ -922,7 +922,96 @@ async function loadSettingsScreen() {
     showToast(err.message);
   }
   updateThemeButtons();
+  refreshPushStatus();
 }
+
+// ---------------------------------------------------------------------------
+// Push notifications — currently just the unfollow worker auto-pausing
+// because Instagram signaled a rate limit (see backend/app/worker.py).
+// ---------------------------------------------------------------------------
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
+async function refreshPushStatus() {
+  const statusEl = document.getElementById("settings-push-status");
+  const enableBtn = document.getElementById("btn-push-enable");
+  const disableBtn = document.getElementById("btn-push-disable");
+
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+    statusEl.textContent = "Not supported in this browser.";
+    enableBtn.classList.add("hidden");
+    disableBtn.classList.add("hidden");
+    return;
+  }
+  if (Notification.permission === "denied") {
+    statusEl.textContent = "Blocked — allow notifications for this site in your browser/phone settings.";
+    enableBtn.classList.add("hidden");
+    disableBtn.classList.add("hidden");
+    return;
+  }
+
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  if (sub) {
+    statusEl.textContent = "Enabled — you'll get a notification if the unfollow worker pauses itself.";
+    enableBtn.classList.add("hidden");
+    disableBtn.classList.remove("hidden");
+  } else {
+    statusEl.textContent = "Off — enable to get notified if the unfollow worker pauses itself (e.g. Instagram rate-limiting you).";
+    enableBtn.classList.remove("hidden");
+    disableBtn.classList.add("hidden");
+  }
+}
+
+document.getElementById("btn-push-enable").addEventListener("click", async (e) => {
+  await withLoading(e.currentTarget, "Enabling…", async () => {
+    try {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        showToast("Push notifications aren't supported in this browser");
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        showToast("Notification permission was not granted");
+        return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const { key } = await api("/api/push/vapid-public-key");
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      });
+      const subJson = sub.toJSON();
+      await api("/api/push/subscribe", { method: "POST", body: { endpoint: subJson.endpoint, keys: subJson.keys } });
+      showToast("Notifications enabled", false);
+    } catch (err) {
+      showToast(err.message);
+    }
+    await refreshPushStatus();
+  });
+});
+
+document.getElementById("btn-push-disable").addEventListener("click", async (e) => {
+  await withLoading(e.currentTarget, "Disabling…", async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await api("/api/push/unsubscribe", { method: "POST", body: { endpoint: sub.endpoint } });
+        await sub.unsubscribe();
+      }
+      showToast("Notifications disabled", false);
+    } catch (err) {
+      showToast(err.message);
+    }
+    await refreshPushStatus();
+  });
+});
 
 document.getElementById("btn-ig-disconnect").addEventListener("click", async (e) => {
   if (!confirm("Disconnect Instagram? You'll need to log in again to sync or unfollow anything.")) return;

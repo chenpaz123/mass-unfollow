@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, db, ig_client, security, worker
+from . import config, db, ig_client, notify, security, worker
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("mass-unfollow")
@@ -526,6 +526,38 @@ def worker_status():
 @app.post("/api/worker/retry-stuck", dependencies=[Depends(require_auth)])
 def worker_retry_stuck():
     db.retry_stuck_accounts()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Push notifications (currently just: the unfollow worker auto-pausing
+# because Instagram signaled a rate limit — see worker.py)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/push/vapid-public-key", dependencies=[Depends(require_auth)])
+def push_vapid_public_key():
+    return {"key": config.VAPID_PUBLIC_KEY}
+
+
+class PushSubscribeBody(BaseModel):
+    endpoint: str
+    keys: dict[str, str]
+
+
+@app.post("/api/push/subscribe", dependencies=[Depends(require_auth)])
+def push_subscribe(body: PushSubscribeBody):
+    db.add_push_subscription(body.endpoint, body.keys["p256dh"], body.keys["auth"])
+    return {"ok": True}
+
+
+class PushUnsubscribeBody(BaseModel):
+    endpoint: str
+
+
+@app.post("/api/push/unsubscribe", dependencies=[Depends(require_auth)])
+def push_unsubscribe(body: PushUnsubscribeBody):
+    db.remove_push_subscription(body.endpoint)
     return {"ok": True}
 
 

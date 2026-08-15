@@ -76,6 +76,14 @@ def init_db():
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                endpoint TEXT NOT NULL UNIQUE,
+                p256dh TEXT NOT NULL,
+                auth TEXT NOT NULL,
+                created_at REAL NOT NULL
+            );
             """
         )
         conn.execute(
@@ -451,3 +459,25 @@ def set_setting(key: str, value: str):
             (key, value),
         )
         conn.commit()
+
+
+def add_push_subscription(endpoint: str, p256dh: str, auth: str):
+    with db_lock() as conn:
+        conn.execute(
+            "INSERT INTO push_subscriptions (endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth",
+            (endpoint, p256dh, auth, time.time()),
+        )
+        conn.commit()
+
+
+def remove_push_subscription(endpoint: str):
+    with db_lock() as conn:
+        conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+        conn.commit()
+
+
+def get_push_subscriptions() -> list[dict]:
+    with db_lock() as conn:
+        rows = conn.execute("SELECT * FROM push_subscriptions").fetchall()
+        return [dict(r) for r in rows]

@@ -5,6 +5,7 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 AVATAR_DIR = DATA_DIR / "avatars"
 DB_PATH = DATA_DIR / "app.db"
 IG_SESSION_PATH = DATA_DIR / "ig_session.json"
+VAPID_PRIVATE_KEY_PATH = DATA_DIR / "vapid_private_key.pem"
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
@@ -29,3 +30,37 @@ try:
     APP_VERSION = VERSION_FILE.read_text().strip()
 except OSError:
     APP_VERSION = "dev"
+
+
+def _load_or_create_vapid_keypair() -> str:
+    """Web Push key pair for browser notifications (e.g. the unfollow worker
+    auto-pausing). Generated once and persisted -- a browser's push
+    subscription is permanently tied to the public key it subscribed with,
+    so rotating this later would silently break every existing subscription
+    (they'd all need to re-enable notifications). Returns the public key as
+    the base64url-encoded uncompressed EC point the browser Push API expects
+    for applicationServerKey; the private key is used straight from
+    VAPID_PRIVATE_KEY_PATH by pywebpush, never held in memory as a string.
+    """
+    import base64
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    if VAPID_PRIVATE_KEY_PATH.exists():
+        private_key = serialization.load_pem_private_key(VAPID_PRIVATE_KEY_PATH.read_bytes(), password=None)
+    else:
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        VAPID_PRIVATE_KEY_PATH.write_bytes(pem)
+
+    numbers = private_key.public_key().public_numbers()
+    uncompressed_point = b"\x04" + numbers.x.to_bytes(32, "big") + numbers.y.to_bytes(32, "big")
+    return base64.urlsafe_b64encode(uncompressed_point).rstrip(b"=").decode()
+
+
+VAPID_PUBLIC_KEY = _load_or_create_vapid_keypair()
