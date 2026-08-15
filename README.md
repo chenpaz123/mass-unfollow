@@ -116,3 +116,18 @@ does, instagrapi needs a matching release. Fix: bump the pin in
 [PyPI](https://pypi.org/project/instagrapi/#history), then
 `docker compose up -d --build`. If errors persist after upgrading, it may
 instead be a temporary soft rate-limit — wait a while before retrying.
+
+## Troubleshooting: deployed an update but the site still looks old
+
+Your hostname is proxied through Cloudflare, which caches static assets
+(HTML/JS/CSS) at its edge independently of your origin server — so
+`docker compose up -d --build` on the server doesn't guarantee the browser
+gets the new files. To confirm: `curl -s http://127.0.0.1:8000/ | grep -c
+"tab-bar"` on the server checks the origin directly; if that looks right but
+an **incognito** tab on the live domain still shows the old version, it's
+Cloudflare's cache, not the deploy. Fix: Cloudflare dashboard → your zone →
+**Caching → Configuration → Purge Cache → Purge Everything** (safe, just
+forces a fresh fetch for everything, including your other subdomains). While
+actively iterating on changes, toggling **Development Mode** on the same page
+bypasses the edge cache entirely for 3 hours so every reload reflects the
+latest deploy — remember to turn it back off afterward.
