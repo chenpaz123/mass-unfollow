@@ -289,7 +289,7 @@ def queue_next():
 
 @app.get("/api/queue/peek", dependencies=[Depends(require_auth)])
 def queue_peek(limit: int = 2):
-    limit = max(1, min(limit, 10))
+    limit = max(1, min(limit, 30))
     rows = db.peek_pending(limit=limit)
     return {"cards": [_card(r) for r in rows]}
 

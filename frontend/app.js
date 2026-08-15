@@ -306,7 +306,7 @@ const swipeEmpty = document.getElementById("swipe-empty");
 // enough to keep their last-post/follows-back lookups warming in the
 // background ahead of time (BUFFER_SIZE total lookahead), without visually
 // stacking more than two cards.
-const BUFFER_SIZE = 5;
+const BUFFER_SIZE = 10;
 let topEl = null, topCard = null;
 let nextEl = null, nextCard = null;
 let prefetchQueue = [];
