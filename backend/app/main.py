@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -66,9 +66,37 @@ def api_session(request: Request):
 
 @app.get("/api/version")
 def api_version():
-    # Intentionally not behind require_auth: the page needs to poll this even
+    # Intentionally not behind require_auth: the page needs to check this even
     # while sitting on the login screen, and a build timestamp isn't sensitive.
     return {"version": config.APP_VERSION}
+
+
+@app.get("/api/version/stream")
+async def api_version_stream(request: Request):
+    """One long-lived connection instead of polling. The version can't change
+    within a running process (it's read once at startup), so there's nothing
+    to push after the first message — the point is what happens when this
+    connection drops: a real deploy restarts the container, which severs it,
+    and the browser's EventSource auto-reconnects on its own. The moment it
+    reconnects to the new process and gets a different version, that's a real
+    update, detected the instant it happens rather than on some poll delay.
+    A dropped connection from a network blip just reconnects to the same
+    process and reports the same version — no false positive.
+    """
+
+    async def event_stream():
+        yield f"retry: 2000\ndata: {config.APP_VERSION}\n\n"
+        while True:
+            if await request.is_disconnected():
+                break
+            await asyncio.sleep(15)
+            yield ": keep-alive\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/logout")

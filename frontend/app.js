@@ -777,20 +777,21 @@ if ("serviceWorker" in navigator) {
 
 let knownVersion = null;
 let updateBannerDismissed = false;
+let versionSource = null;
 
-async function checkVersion() {
-  try {
-    const res = await fetch("/api/version", { credentials: "same-origin" });
-    if (!res.ok) return;
-    const { version } = await res.json();
+function startVersionStream() {
+  if (versionSource) versionSource.close();
+  versionSource = new EventSource("/api/version/stream");
+  versionSource.onmessage = (ev) => {
+    const version = ev.data;
     if (knownVersion === null) {
       knownVersion = version;
     } else if (version !== knownVersion && !updateBannerDismissed) {
       document.getElementById("update-banner").classList.remove("hidden");
     }
-  } catch (_) {
-    // silent — a failed version check shouldn't be user-visible
-  }
+  };
+  // onerror fires on every drop, including ones EventSource will silently
+  // auto-reconnect from (network blips) — nothing to do here, that's expected.
 }
 
 document.getElementById("btn-update-reload").addEventListener("click", async () => {
@@ -810,8 +811,12 @@ document.getElementById("btn-update-dismiss").addEventListener("click", () => {
   document.getElementById("update-banner").classList.add("hidden");
 });
 
-checkVersion();
-setInterval(checkVersion, 5 * 60 * 1000);
+startVersionStream();
+// Safety net: if the connection got fully torn down while backgrounded
+// (mobile browsers can do this more aggressively than a plain network blip),
+// make sure it's re-established as soon as the app is foregrounded again.
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") checkVersion();
+  if (document.visibilityState === "visible" && (!versionSource || versionSource.readyState === EventSource.CLOSED)) {
+    startVersionStream();
+  }
 });
