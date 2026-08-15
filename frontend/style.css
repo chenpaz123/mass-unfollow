@@ -90,6 +90,17 @@ input {
 }
 input:focus { outline: 2px solid var(--accent); }
 
+select {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 0.9rem;
+  width: 100%;
+  margin-top: 10px;
+}
+
 button {
   background: var(--accent);
   color: white;
@@ -182,6 +193,16 @@ button { transition: transform 0.08s ease, opacity 0.15s ease; }
   min-height: 1.2em;
 }
 .last-post.pending { opacity: 0.6; }
+
+.follows-back {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  min-height: 1.2em;
+}
+.follows-back.yes { color: var(--success); }
+.follows-back.no { color: var(--danger); }
+.follows-back.pending { opacity: 0.6; }
 
 .profile-link {
   margin-top: 18px;

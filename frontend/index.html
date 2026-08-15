@@ -132,6 +132,17 @@
 
       <button id="btn-back-swipe" class="secondary">← Back to swiping</button>
 
+      <h2>Swipe order</h2>
+      <p class="muted">Reorders everyone not yet reviewed. Uses only data already synced — no extra
+        Instagram lookups, so it's instant and doesn't add to your usage.</p>
+      <select id="cfg-reorder-mode">
+        <option value="random">Shuffled (default)</option>
+        <option value="private_first">Private accounts first</option>
+        <option value="no_name_first">No display name first</option>
+        <option value="verified_last">Verified accounts last</option>
+      </select>
+      <button id="btn-apply-reorder" class="secondary">Apply to swipe queue</button>
+
       <h2>Unfollow queue</h2>
       <p class="muted">Unfollows run slowly in the background to keep your account safe — a random delay
         between each one, capped per day.</p>
@@ -197,6 +208,10 @@
         <input type="password" id="settings-new-password" placeholder="New password" autocomplete="new-password" required />
         <button type="submit" class="secondary">Change password</button>
       </form>
+
+      <h2>Export</h2>
+      <p class="muted">Download a CSV of every account you've reviewed — username, decision, and when.</p>
+      <button id="btn-export-csv" class="secondary">Export to CSV</button>
 
       <h2>Danger zone</h2>
       <p class="muted">Wipes every synced account and all keep/unfollow decisions from this app. Does not

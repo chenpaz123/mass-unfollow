@@ -92,6 +92,10 @@ def init_db():
             conn.execute("ALTER TABLE accounts ADD COLUMN last_post_at REAL")
         if "last_post_checked" not in existing_cols:
             conn.execute("ALTER TABLE accounts ADD COLUMN last_post_checked INTEGER NOT NULL DEFAULT 0")
+        if "follows_back" not in existing_cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN follows_back INTEGER")
+        if "follows_back_checked" not in existing_cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN follows_back_checked INTEGER NOT NULL DEFAULT 0")
 
         conn.commit()
 
@@ -233,6 +237,17 @@ def set_last_post_info(user_id: str, last_post_at: float | None):
         conn.commit()
 
 
+def set_follows_back_info(user_id: str, follows_back: bool | None):
+    """Same lazy-cache-forever pattern as last-post: one Instagram lookup per
+    account, ever, the first time its card is actually viewed."""
+    with db_lock() as conn:
+        conn.execute(
+            "UPDATE accounts SET follows_back = ?, follows_back_checked = 1 WHERE user_id = ?",
+            (follows_back, user_id),
+        )
+        conn.commit()
+
+
 def get_worker_state() -> dict:
     with db_lock() as conn:
         row = conn.execute("SELECT * FROM worker_state WHERE id = 1").fetchone()
@@ -293,6 +308,39 @@ def reset_daily_counter(day_marker: str):
             (day_marker,),
         )
         conn.commit()
+
+
+# Maps a reorder mode to a SQL expression producing a low-to-high "tier"
+# number for pending accounts — everything in tier 0 sorts before tier 1.
+# Ties within a tier are broken randomly (added below), not left in whatever
+# order SQLite happens to return them. Deliberately built only from columns
+# already synced for every account (no extra Instagram lookups), unlike
+# last-post-date or follows-back, which are fetched lazily per card and
+# aren't available for the whole backlog up front.
+REORDER_MODES = {
+    "random": "0",
+    "private_first": "CASE WHEN is_private = 1 THEN 0 ELSE 1 END",
+    "no_name_first": "CASE WHEN TRIM(COALESCE(full_name, '')) = '' THEN 0 ELSE 1 END",
+    "verified_last": "CASE WHEN is_verified = 1 THEN 1 ELSE 0 END",
+}
+
+
+def reorder_pending(mode: str):
+    tier_expr = REORDER_MODES.get(mode, REORDER_MODES["random"])
+    with db_lock() as conn:
+        conn.execute(
+            f"UPDATE accounts SET sort_order = ({tier_expr}) + (ABS(RANDOM()) / 9223372036854775808.0) "
+            "WHERE decision = 'pending'"
+        )
+        conn.commit()
+
+
+def all_accounts_for_export() -> list[dict]:
+    with db_lock() as conn:
+        rows = conn.execute(
+            "SELECT * FROM accounts ORDER BY COALESCE(decided_at, 0) DESC, username ASC"
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def search_accounts(

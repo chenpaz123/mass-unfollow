@@ -1,6 +1,9 @@
 import asyncio
+import csv
+import io
 import logging
 import time
+from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -271,6 +274,8 @@ def _card(row: dict) -> dict:
         "avatar_url": f"/api/avatar/{row['user_id']}",
         "last_post_checked": bool(row["last_post_checked"]),
         "last_post_at": row["last_post_at"],
+        "follows_back_checked": bool(row["follows_back_checked"]),
+        "follows_back": bool(row["follows_back"]) if row["follows_back"] is not None else None,
     }
 
 
@@ -316,6 +321,18 @@ def stats():
     return db.get_stats()
 
 
+class ReorderBody(BaseModel):
+    mode: str  # one of db.REORDER_MODES
+
+
+@app.post("/api/queue/reorder", dependencies=[Depends(require_auth)])
+def reorder_queue(body: ReorderBody):
+    if body.mode not in db.REORDER_MODES:
+        raise HTTPException(status_code=400, detail="invalid reorder mode")
+    db.reorder_pending(body.mode)
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Accounts: search + history (retroactive decisions, refollow)
 # ---------------------------------------------------------------------------
@@ -358,6 +375,34 @@ def set_account_decision(user_id: str, body: AccountDecisionBody):
         )
     db.update_decision_generic(user_id, body.decision)
     return {"ok": True}
+
+
+@app.get("/api/export/csv", dependencies=[Depends(require_auth)])
+def export_csv():
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        ["username", "full_name", "decision", "decided_at", "unfollowed_at", "is_private", "is_verified", "profile_url"]
+    )
+    for a in db.all_accounts_for_export():
+        writer.writerow(
+            [
+                a["username"],
+                a["full_name"],
+                a["decision"],
+                datetime.fromtimestamp(a["decided_at"]).isoformat() if a["decided_at"] else "",
+                datetime.fromtimestamp(a["unfollowed_at"]).isoformat() if a["unfollowed_at"] else "",
+                "yes" if a["is_private"] else "no",
+                "yes" if a["is_verified"] else "no",
+                f"https://www.instagram.com/{a['username']}/",
+            ]
+        )
+    filename = f"mass-unfollow-export-{date.today().isoformat()}.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.post("/api/accounts/{user_id}/refollow", dependencies=[Depends(require_auth)])
@@ -422,6 +467,28 @@ async def last_post(user_id: str):
             return {"checked": False, "error": str(e)}
     db.set_last_post_info(user_id, ts)
     return {"checked": True, "last_post_at": ts}
+
+
+@app.get("/api/follows-back/{user_id}", dependencies=[Depends(require_auth)])
+async def follows_back(user_id: str):
+    """Lazily fetched and cached exactly like last-post: one Instagram lookup
+    per account, ever, the first time its card is actually viewed."""
+    account = db.get_account(user_id)
+    if not account:
+        raise HTTPException(status_code=404)
+    if account["follows_back_checked"]:
+        fb = account["follows_back"]
+        return {"checked": True, "follows_back": bool(fb) if fb is not None else None}
+    if not ig_client.is_authenticated():
+        return {"checked": False, "error": "not_authenticated"}
+    async with ig_client.ig_call_lock:
+        try:
+            fb = await asyncio.to_thread(ig_client.get_follows_back, user_id)
+        except Exception as e:
+            log.warning("follows-back lookup failed for %s: %s", user_id, e)
+            return {"checked": False, "error": str(e)}
+    db.set_follows_back_info(user_id, fb)
+    return {"checked": True, "follows_back": fb}
 
 
 # ---------------------------------------------------------------------------

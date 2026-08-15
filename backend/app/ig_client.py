@@ -324,6 +324,15 @@ def refollow(user_id: str):
     cl.user_follow(int(user_id))
 
 
+def get_follows_back(user_id: str) -> bool | None:
+    """Whether this account follows the logged-in account back. None if
+    Instagram wouldn't tell us (user_friendship_v1 swallows ClientError and
+    returns None itself), not just "not yet fetched"."""
+    cl = get_client()
+    rel = cl.user_friendship_v1(str(user_id))
+    return bool(rel.followed_by) if rel is not None else None
+
+
 def fetch_avatar_bytes(profile_pic_url: str) -> bytes | None:
     if not profile_pic_url:
         return None

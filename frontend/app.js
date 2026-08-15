@@ -319,6 +319,7 @@ function makeCardEl(card, roleClass) {
     <div class="full-name"></div>
     <div class="badges"></div>
     <div class="last-post"></div>
+    <div class="follows-back"></div>
     <a class="profile-link" target="_blank" rel="noopener noreferrer">View on Instagram ↗</a>
   `;
   fillCardEl(el, card);
@@ -337,6 +338,9 @@ function fillCardEl(el, card) {
   if (card.is_verified) badges.innerHTML += '<span class="badge">Verified</span>';
   el.querySelector(".profile-link").href = `https://www.instagram.com/${encodeURIComponent(card.username)}/`;
   el.querySelector(".last-post").textContent = "";
+  const fb = el.querySelector(".follows-back");
+  fb.textContent = "";
+  fb.classList.remove("yes", "no", "pending");
 }
 
 function timeAgo(unixSeconds) {
@@ -381,6 +385,47 @@ async function loadLastPost(el, card) {
   }
 }
 
+function renderFollowsBack(el, state, followsBack) {
+  const target = el.querySelector(".follows-back");
+  target.classList.remove("yes", "no", "pending");
+  if (state === "loading") {
+    target.classList.add("pending");
+    target.textContent = "Checking follow status…";
+  } else if (state === "unknown" || followsBack === null) {
+    target.textContent = "";
+  } else if (followsBack) {
+    target.classList.add("yes");
+    target.textContent = "Follows you back";
+  } else {
+    target.classList.add("no");
+    target.textContent = "Doesn't follow you back";
+  }
+}
+
+// Same lazy-once-per-account pattern as loadLastPost, kept as a separate
+// call so each signal is independently cached and one failing doesn't block
+// the other.
+async function loadFollowsBack(el, card) {
+  if (card.follows_back_checked) {
+    renderFollowsBack(el, "value", card.follows_back);
+    return;
+  }
+  renderFollowsBack(el, "loading");
+  try {
+    const result = await api(`/api/follows-back/${card.user_id}`);
+    if (el.dataset.userId !== card.user_id) return; // card moved on before this resolved
+    if (result.checked) {
+      card.follows_back_checked = true;
+      card.follows_back = result.follows_back;
+      renderFollowsBack(el, "value", result.follows_back);
+    } else {
+      renderFollowsBack(el, "unknown");
+    }
+  } catch (_) {
+    if (el.dataset.userId === card.user_id) renderFollowsBack(el, "unknown");
+  }
+}
+
 async function initQueue() {
   const { cards } = await api("/api/queue/peek?limit=2");
   if (topEl) topEl.remove();
@@ -400,6 +445,7 @@ async function initQueue() {
   topEl.addEventListener("pointerdown", onPointerDown);
   cardStack.appendChild(topEl);
   loadLastPost(topEl, topCard);
+  loadFollowsBack(topEl, topCard);
   updateRemaining();
 }
 
@@ -468,6 +514,7 @@ async function flyOut(decision) {
     topEl.classList.add("top");
     topEl.addEventListener("pointerdown", onPointerDown);
     loadLastPost(topEl, topCard);
+    loadFollowsBack(topEl, topCard);
   } else {
     swipeEmpty.classList.remove("hidden");
   }
@@ -587,6 +634,12 @@ async function refreshReview() {
     `Unfollowed today: ${wstate.unfollowed_today} / ${wstate.daily_cap}`,
     `Remaining in queue: ${wstate.remaining_to_unfollow}`,
   ];
+  // Rough estimate, not accounting for today's already-used capacity — good
+  // enough for "how long is this backlog", not meant to be precise to the day.
+  if (wstate.remaining_to_unfollow > 0 && wstate.daily_cap > 0) {
+    const daysLeft = Math.ceil(wstate.remaining_to_unfollow / wstate.daily_cap);
+    lines.push(`Estimated time left: ~${daysLeft} day${daysLeft === 1 ? "" : "s"} at this pace`);
+  }
   if (wstate.last_error) lines.push(`Last error: ${wstate.last_error}`);
   statusEl.innerHTML = lines.map((l) => `<div>${l}</div>`).join("");
 
@@ -603,6 +656,20 @@ async function refreshReview() {
 document.getElementById("btn-resync").addEventListener("click", () => {
   stopWorkerPolling();
   startSync();
+});
+
+document.getElementById("btn-apply-reorder").addEventListener("click", async (e) => {
+  await withLoading(e.currentTarget, "Reordering…", async () => {
+    try {
+      await api("/api/queue/reorder", {
+        method: "POST",
+        body: { mode: document.getElementById("cfg-reorder-mode").value },
+      });
+      showToast("Swipe order updated", false);
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
 });
 
 document.getElementById("btn-save-worker-config").addEventListener("click", async (e) => {
@@ -804,6 +871,28 @@ document.getElementById("form-change-password").addEventListener("submit", async
       });
       e.target.reset();
       showToast("Password changed", false);
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+});
+
+document.getElementById("btn-export-csv").addEventListener("click", async (e) => {
+  // Not using the api() helper here — it assumes a JSON response, and a CSV
+  // download needs the raw blob plus a filename, not a parsed body.
+  await withLoading(e.currentTarget, "Exporting…", async () => {
+    try {
+      const res = await fetch("/api/export/csv", { credentials: "same-origin" });
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `mass-unfollow-export-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     } catch (err) {
       showToast(err.message);
     }

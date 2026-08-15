@@ -35,26 +35,31 @@ turn them off or push them to extremes (see [Safe pacing](#safe-pacing) below).
 - **Swipe** — the main flow. Drag a card (or use the ♥ / ✕ buttons, or ← / →
   arrow keys) to decide keep or unfollow, one account at a time. The next card
   peeks from behind the current one; deciding promotes it instantly with no
-  loading delay. Each card also shows **last post date** (fetched lazily and
-  cached the first time you see that card, so it's one Instagram lookup per
-  account you actually view — a quick way to spot dead/inactive accounts) and
-  a **View on Instagram** link to double-check before deciding. Undo reverts
-  your last decision. A running **reviewed** counter sits above the stack next
-  to the remaining count, with a small toast celebration every 100 accounts
-  reviewed (a bigger one on round thousands).
+  loading delay. Each card also shows **last post date** and **follows you
+  back?** (both fetched lazily and cached the first time you see that card, so
+  each is one Instagram lookup per account you actually view — quick ways to
+  spot dead/inactive accounts and one-sided follows) and a **View on
+  Instagram** link to double-check before deciding. Undo reverts your last
+  decision. A running **reviewed** counter sits above the stack next to the
+  remaining count, with a small toast celebration every 100 accounts reviewed
+  (a bigger one on round thousands).
 - **Queue** — stats (total / not yet reviewed / kept / queued to unfollow),
-  a **Resync following list** button to pick up new follows later, and the
-  unfollow worker controls (daily cap, delay range, start/pause, live
-  progress).
+  a **Resync following list** button to pick up new follows later, a
+  **swipe order** control to reorder everyone not yet reviewed (private
+  first, no display name first, verified last, or shuffled — computed from
+  data already synced, no extra Instagram lookups), and the unfollow worker
+  controls (daily cap, delay range, start/pause, live progress, and an
+  estimated time left for the current backlog at the configured pace).
 - **History** — every account you've made a decision on, searchable and
   filterable by decision. Lets you flip a decision back and forth (kept →
   queue for unfollow → reset to pending) for anything not yet actually
   unfollowed, and **Refollow** for anything this app already unfollowed (calls
   Instagram's follow API for real and clears the record).
 - **Settings** — see your connected Instagram username and disconnect it,
-  change the app password, switch theme, and a danger-zone **Reset all data**
-  (wipes this app's local records only — never touches Instagram, already-
-  unfollowed accounts stay unfollowed).
+  change the app password, switch theme, **export to CSV** (username,
+  decision, and timestamps for everything you've reviewed), and a danger-zone
+  **Reset all data** (wipes this app's local records only — never touches
+  Instagram, already-unfollowed accounts stay unfollowed).
 
 ## 1. Run it on your server
 
@@ -158,9 +163,11 @@ Instagram doesn't publish official limits, but community-tested consensus
   accounts to unfollow (swiping, or from History) has no cap at all; only the
   worker that actually executes them is throttled.
 - Avatars are fetched from Instagram's CDN on first view and cached to
-  `./data/avatars`. Last-post dates are cached permanently once fetched too
-  (a "no posts" result is cached; a failed/rate-limited lookup is not, so it
-  retries next time you see that card).
+  `./data/avatars`. Last-post dates and follows-you-back status are each
+  cached permanently once fetched too (a definitive result is cached; a
+  failed/rate-limited lookup is not, so it retries next time you see that
+  card) — each is one extra Instagram lookup per account you actually swipe
+  through, on top of the swipe itself.
 - Changing the app password from Settings replaces the `.env` value — it's
   hashed and stored in the database from that point on.
 - If you ever want to start over, stop the container and delete `./data`
