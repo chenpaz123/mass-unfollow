@@ -7,7 +7,12 @@ const SHELL_FILES = ["/", "/style.css", "/app.js", "/manifest.json"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES)));
-  self.skipWaiting();
+  // Deliberately no skipWaiting() here. A newly installed worker sits in the
+  // "waiting" state and never takes over open tabs on its own until the page
+  // unregisters it — which only happens when the user clicks Reload on the
+  // update banner (see app.js). Without this, a new worker could silently
+  // start controlling every open tab the instant it finishes installing,
+  // before anyone has agreed to update.
 });
 
 self.addEventListener("activate", (event) => {
