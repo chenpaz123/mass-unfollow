@@ -102,6 +102,13 @@ def upsert_accounts(rows: list[dict]):
         conn.commit()
 
 
+def randomize_sort_order():
+    """Reshuffle the swipe queue order after a sync completes."""
+    with db_lock() as conn:
+        conn.execute("UPDATE accounts SET sort_order = ABS(RANDOM())")
+        conn.commit()
+
+
 def set_sync_status(status: str, fetched_count: int = None, total_count: int = None, error: str = None):
     fields = ["status = ?"]
     values = [status]

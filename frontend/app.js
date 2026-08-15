@@ -55,16 +55,34 @@ boot().catch((e) => console.error(e));
 // App password gate
 // ---------------------------------------------------------------------------
 
+// Disables a submit button and swaps its label while an async action runs,
+// so slow requests (Instagram logins can take several seconds) never look
+// like the page just froze.
+async function withLoading(button, loadingText, fn) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.textContent = loadingText;
+  try {
+    await fn();
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
 document.getElementById("form-app-login").addEventListener("submit", async (e) => {
   e.preventDefault();
   const err = document.getElementById("app-login-error");
   err.textContent = "";
-  try {
-    await api("/api/login", { method: "POST", body: { password: document.getElementById("app-password").value } });
-    await boot();
-  } catch (e2) {
-    err.textContent = e2.message;
-  }
+  const btn = e.target.querySelector("button");
+  await withLoading(btn, "Unlocking…", async () => {
+    try {
+      await api("/api/login", { method: "POST", body: { password: document.getElementById("app-password").value } });
+      await boot();
+    } catch (e2) {
+      err.textContent = e2.message;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -84,52 +102,61 @@ document.getElementById("form-sessionid").addEventListener("submit", async (e) =
   e.preventDefault();
   const err = document.getElementById("ig-login-error");
   err.textContent = "";
-  try {
-    const result = await api("/api/ig/login/session", {
-      method: "POST",
-      body: { sessionid: document.getElementById("sessionid").value },
-    });
-    if (result.status === "authenticated") await boot();
-    else err.textContent = result.error || "Login failed.";
-  } catch (e2) {
-    err.textContent = e2.message;
-  }
+  const btn = e.target.querySelector("button");
+  await withLoading(btn, "Connecting…", async () => {
+    try {
+      const result = await api("/api/ig/login/session", {
+        method: "POST",
+        body: { sessionid: document.getElementById("sessionid").value },
+      });
+      if (result.status === "authenticated") await boot();
+      else err.textContent = result.error || "Login failed.";
+    } catch (e2) {
+      err.textContent = e2.message;
+    }
+  });
 });
 
 document.getElementById("form-password").addEventListener("submit", async (e) => {
   e.preventDefault();
   const err = document.getElementById("ig-login-error");
   err.textContent = "";
-  try {
-    const result = await api("/api/ig/login/password", {
-      method: "POST",
-      body: {
-        username: document.getElementById("ig-username").value,
-        password: document.getElementById("ig-password").value,
-      },
-    });
-    if (result.status === "authenticated") { await boot(); return; }
-    if (result.status === "need_2fa") { document.getElementById("form-2fa").classList.remove("hidden"); return; }
-    err.textContent = result.error || "Login failed.";
-  } catch (e2) {
-    err.textContent = e2.message;
-  }
+  const btn = e.target.querySelector("button");
+  await withLoading(btn, "Logging in…", async () => {
+    try {
+      const result = await api("/api/ig/login/password", {
+        method: "POST",
+        body: {
+          username: document.getElementById("ig-username").value,
+          password: document.getElementById("ig-password").value,
+        },
+      });
+      if (result.status === "authenticated") { await boot(); return; }
+      if (result.status === "need_2fa") { document.getElementById("form-2fa").classList.remove("hidden"); return; }
+      err.textContent = result.error || "Login failed.";
+    } catch (e2) {
+      err.textContent = e2.message;
+    }
+  });
 });
 
 document.getElementById("form-2fa").addEventListener("submit", async (e) => {
   e.preventDefault();
   const err = document.getElementById("ig-login-error");
   err.textContent = "";
-  try {
-    const result = await api("/api/ig/login/2fa", {
-      method: "POST",
-      body: { code: document.getElementById("ig-2fa-code").value },
-    });
-    if (result.status === "authenticated") await boot();
-    else err.textContent = result.error || "Code rejected.";
-  } catch (e2) {
-    err.textContent = e2.message;
-  }
+  const btn = e.target.querySelector("button");
+  await withLoading(btn, "Verifying…", async () => {
+    try {
+      const result = await api("/api/ig/login/2fa", {
+        method: "POST",
+        body: { code: document.getElementById("ig-2fa-code").value },
+      });
+      if (result.status === "authenticated") await boot();
+      else err.textContent = result.error || "Code rejected.";
+    } catch (e2) {
+      err.textContent = e2.message;
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -148,8 +175,16 @@ function renderSyncScreen(state) {
   if (state.status === "running") {
     summary.textContent = "";
     progress.classList.remove("hidden");
-    fill.classList.add("indeterminate");
-    text.textContent = "Fetching your following list from Instagram — this can take a few minutes for large accounts.";
+    if (state.total_count > 0) {
+      fill.classList.remove("indeterminate");
+      fill.style.width = `${Math.min(100, (state.fetched_count / state.total_count) * 100)}%`;
+      text.textContent = `Fetched ${state.fetched_count} of ${state.total_count} so far…`;
+    } else {
+      fill.classList.add("indeterminate");
+      text.textContent = state.fetched_count > 0
+        ? `Fetched ${state.fetched_count} so far…`
+        : "Starting…";
+    }
     goBtn.classList.add("hidden");
     if (!syncPollTimer) syncPollTimer = setInterval(pollSync, 2000);
   } else if (state.status === "done") {

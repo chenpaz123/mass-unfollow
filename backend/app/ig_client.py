@@ -210,23 +210,31 @@ def logout():
         config.IG_SESSION_PATH.unlink()
 
 
-def get_own_following() -> list[dict]:
-    """Fetch the full following list. Blocking/sync — call from a worker thread."""
+def get_own_following_count() -> int:
+    """Cheap lookup of the expected total, for a real "X / N" progress display."""
     cl = get_client()
-    following = cl.user_following_v1(cl.user_id, amount=0)
-    result = []
-    for u in following:
-        result.append(
-            {
-                "user_id": str(u.pk),
-                "username": u.username,
-                "full_name": u.full_name or "",
-                "is_private": 1 if u.is_private else 0,
-                "is_verified": 1 if u.is_verified else 0,
-                "profile_pic_url": str(u.profile_pic_url) if u.profile_pic_url else "",
-            }
-        )
-    return result
+    return cl.user_info_v1(cl.user_id).following_count
+
+
+def _to_account_dict(u) -> dict:
+    return {
+        "user_id": str(u.pk),
+        "username": u.username,
+        "full_name": u.full_name or "",
+        "is_private": 1 if u.is_private else 0,
+        "is_verified": 1 if u.is_verified else 0,
+        "profile_pic_url": str(u.profile_pic_url) if u.profile_pic_url else "",
+    }
+
+
+def iter_own_following():
+    """Yields following accounts one at a time as they're paginated in.
+
+    Blocking/sync generator — call from a worker thread, not the event loop.
+    """
+    cl = get_client()
+    for u in cl.iter_user_following_v1(cl.user_id):
+        yield _to_account_dict(u)
 
 
 def unfollow(user_id: str):

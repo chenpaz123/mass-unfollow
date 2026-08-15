@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import random
 import time
 from pathlib import Path
 
@@ -128,16 +127,40 @@ def ig_logout():
 # ---------------------------------------------------------------------------
 
 
+SYNC_FLUSH_EVERY = 50
+
+
+def _sync_worker() -> int:
+    """Runs in a worker thread. Paginates through the following list,
+    flushing batches to the DB as they arrive so progress is real (shown
+    to the user as it happens) and isn't lost if something fails partway."""
+    try:
+        total = ig_client.get_own_following_count()
+    except Exception:
+        total = 0
+    db.set_sync_status("running", fetched_count=0, total_count=total)
+
+    batch = []
+    fetched = 0
+    for row in ig_client.iter_own_following():
+        row["sort_order"] = float(fetched)
+        batch.append(row)
+        fetched += 1
+        if len(batch) >= SYNC_FLUSH_EVERY:
+            db.upsert_accounts(batch)
+            batch = []
+            db.set_sync_status("running", fetched_count=fetched, total_count=total)
+    if batch:
+        db.upsert_accounts(batch)
+    return fetched
+
+
 async def _run_sync():
-    db.set_sync_status("running", fetched_count=0)
     try:
         async with ig_client.ig_call_lock:
-            rows = await asyncio.to_thread(ig_client.get_own_following)
-        random.shuffle(rows)
-        for i, r in enumerate(rows):
-            r["sort_order"] = float(i)
-        db.upsert_accounts(rows)
-        db.set_sync_status("done", fetched_count=len(rows), total_count=len(rows))
+            fetched = await asyncio.to_thread(_sync_worker)
+        db.randomize_sort_order()
+        db.set_sync_status("done", fetched_count=fetched, total_count=fetched)
     except Exception as e:
         log.exception("Sync failed")
         db.set_sync_status("error", error=str(e))
