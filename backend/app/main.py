@@ -64,6 +64,13 @@ def api_session(request: Request):
     return {"authenticated": security.verify_cookie(request.cookies.get(security.COOKIE_NAME))}
 
 
+@app.get("/api/version")
+def api_version():
+    # Intentionally not behind require_auth: the page needs to poll this even
+    # while sitting on the login screen, and a build timestamp isn't sensitive.
+    return {"version": config.APP_VERSION}
+
+
 @app.post("/api/logout")
 def api_logout(response: Response):
     response.delete_cookie(security.COOKIE_NAME)

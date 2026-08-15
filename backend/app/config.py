@@ -21,3 +21,11 @@ IG_DELAY_RANGE = [
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+
+# Stamped into the image at build time (see Dockerfile) — changes exactly
+# when the app code actually changes, used to detect stale clients.
+VERSION_FILE = Path("/srv/VERSION")
+try:
+    APP_VERSION = VERSION_FILE.read_text().strip()
+except OSError:
+    APP_VERSION = "dev"

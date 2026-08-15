@@ -8,6 +8,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app ./app
 COPY frontend ../frontend
 
+# Cache-busted only by the two COPY layers above, so this changes exactly
+# when the actual app code changes — used to detect "a newer version is
+# deployed than what the browser/phone currently has loaded".
+RUN date +%s > VERSION
+
 ENV DATA_DIR=/data
 VOLUME ["/data"]
 

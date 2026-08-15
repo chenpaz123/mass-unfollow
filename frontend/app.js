@@ -762,3 +762,50 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch((e) => console.error("SW registration failed:", e));
   });
 }
+
+// ---------------------------------------------------------------------------
+// Update notification: detects when the server is running newer code than
+// what this page loaded — the common case being a phone that had the PWA
+// open/backgrounded across a deploy and never reloaded on its own.
+// ---------------------------------------------------------------------------
+
+let knownVersion = null;
+let updateBannerDismissed = false;
+
+async function checkVersion() {
+  try {
+    const res = await fetch("/api/version", { credentials: "same-origin" });
+    if (!res.ok) return;
+    const { version } = await res.json();
+    if (knownVersion === null) {
+      knownVersion = version;
+    } else if (version !== knownVersion && !updateBannerDismissed) {
+      document.getElementById("update-banner").classList.remove("hidden");
+    }
+  } catch (_) {
+    // silent — a failed version check shouldn't be user-visible
+  }
+}
+
+document.getElementById("btn-update-reload").addEventListener("click", async () => {
+  if ("serviceWorker" in navigator) {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
+  }
+  if ("caches" in window) {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((k) => caches.delete(k)));
+  }
+  location.reload();
+});
+
+document.getElementById("btn-update-dismiss").addEventListener("click", () => {
+  updateBannerDismissed = true;
+  document.getElementById("update-banner").classList.add("hidden");
+});
+
+checkVersion();
+setInterval(checkVersion, 5 * 60 * 1000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") checkVersion();
+});
