@@ -180,7 +180,22 @@ def login_with_password(username: str, password: str):
             auth_state._pending_password = password
             auth_state.status = "need_2fa"
         return
-    except ChallengeRequired:
+    except ChallengeRequired as e:
+        # Diagnostic only for now: instagrapi has a real challenge_resolve()
+        # mechanism that can drive a code-based (SMS/email) checkpoint
+        # automatically, but only for some challenge types -- others
+        # ("native flow" / "auth platform" redirects) have no automated path
+        # at all and genuinely require the real app on a trusted device.
+        # Logging exactly what Instagram sent before deciding whether
+        # building that flow is even worth it for this kind of checkpoint.
+        challenge = getattr(e, "challenge", None)
+        log.warning(
+            "ChallengeRequired for %s -- message=%r challenge=%r raw_message=%r",
+            username,
+            getattr(e, "message", None),
+            challenge,
+            getattr(e, "raw_message", None),
+        )
         with auth_state.lock:
             auth_state.status = "error"
             auth_state.error = (
