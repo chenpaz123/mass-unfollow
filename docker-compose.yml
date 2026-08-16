@@ -17,12 +17,13 @@ services:
       # network isolation — make sure both are set before exposing this.
       - "8000:8000"
 
-  # A second, fully independent instance for someone else to connect their
+  # Additional fully independent instances for someone else to connect their
   # own Instagram account to. Same image/code, but its own container, own
   # data volume, own .env (own APP_PASSWORD/SECRET_KEY), own port — nothing
-  # here is shared with the primary instance above. This app has no
-  # multi-user support, so separate deployments are the safe way to let a
-  # second person use it without their session/data mixing with yours.
+  # here is shared with the primary instance above or with each other. This
+  # app has no multi-user support, so separate deployments are the safe way
+  # to let another person use it without their session/data mixing with
+  # anyone else's.
   mass-unfollow-martin:
     build:
       context: .
@@ -35,3 +36,16 @@ services:
       - ./data-martin:/data
     ports:
       - "8001:8000"
+
+  mass-unfollow-tal:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: mass-unfollow-tal
+    restart: unless-stopped
+    env_file:
+      - .env.tal
+    volumes:
+      - ./data-tal:/data
+    ports:
+      - "8002:8000"
