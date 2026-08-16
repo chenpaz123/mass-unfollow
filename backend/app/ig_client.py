@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import threading
 
@@ -64,8 +65,47 @@ _client_lock = threading.Lock()
 ig_call_lock = asyncio.Lock()
 
 
+# Device-identity fields from instagrapi's own get_settings() -- everything
+# a fresh Client() randomizes at construction time (uuids, simulated Android
+# device, user agent) but *not* auth state (cookies, authorization_data),
+# which doesn't exist yet before a login has ever succeeded.
+_DEVICE_SETTINGS_KEYS = (
+    "uuids",
+    "device_settings",
+    "user_agent",
+    "country",
+    "country_code",
+    "locale",
+    "timezone_offset",
+    "timezone_name",
+)
+
+
+def _load_or_create_device_settings() -> dict:
+    """The simulated phone identity (uuids, device string, user agent) this
+    deployment presents to Instagram, persisted so it stays IDENTICAL across
+    every login attempt -- including failed/challenged ones.
+
+    Without this, every call to _new_client() built a bare Client() with no
+    settings, so instagrapi randomized a brand-new phone_id/uuid/
+    android_device_id/advertising_id on every single attempt. To Instagram's
+    risk engine that looks like a different, never-before-seen phone trying
+    to log in each time -- one of the most suspicious patterns there is, and
+    a plausible driver of hard "native_flow" checkpoints that have no
+    automated resolution. Retries should look like the same phone trying
+    again, not a new one every time.
+    """
+    if config.IG_DEVICE_PATH.exists():
+        return json.loads(config.IG_DEVICE_PATH.read_text())
+    seed_cl = Client()
+    settings = {k: seed_cl.get_settings()[k] for k in _DEVICE_SETTINGS_KEYS}
+    config.IG_DEVICE_PATH.write_text(json.dumps(settings))
+    return settings
+
+
 def _new_client() -> Client:
     cl = Client()
+    cl.set_settings(_load_or_create_device_settings())
     cl.delay_range = config.IG_DELAY_RANGE
     # Client.__init__ already mounted an adapter on `private` with retry-on-
     # 429/5xx built in (_configure_private_session_retry) — mounting a plain

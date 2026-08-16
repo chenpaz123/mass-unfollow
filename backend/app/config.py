@@ -5,6 +5,7 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 AVATAR_DIR = DATA_DIR / "avatars"
 DB_PATH = DATA_DIR / "app.db"
 IG_SESSION_PATH = DATA_DIR / "ig_session.json"
+IG_DEVICE_PATH = DATA_DIR / "ig_device.json"
 VAPID_PRIVATE_KEY_PATH = DATA_DIR / "vapid_private_key.pem"
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
