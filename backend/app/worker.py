@@ -6,6 +6,7 @@ from datetime import date
 from instagrapi.exceptions import (
     ClientThrottledError,
     FeedbackRequired,
+    LoginRequired,
     PleaseWaitFewMinutes,
     RateLimitError,
     SentryBlock,
@@ -86,6 +87,28 @@ async def _tick():
                 notify.send_push,
                 "Unfollow worker paused",
                 "Instagram signaled you're doing this too fast. Wait a while before resuming from the Queue tab.",
+            )
+            return
+        except LoginRequired:
+            # Instagram invalidated this session entirely -- e.g. it force-
+            # logged-out all devices for "suspicious activity". Not this (or
+            # any) account's fault, so don't touch fail_count. Log out
+            # properly so is_authenticated() actually goes false and the app
+            # falls back to the Connect Instagram screen, instead of every
+            # subsequent account silently piling up as individually "stuck"
+            # while the real cause (a dead session) stays invisible.
+            ig_client.logout()
+            db.update_worker_config(enabled=False)
+            db.bump_worker_progress(
+                today,
+                state["unfollowed_today"],
+                last_error="Instagram logged this session out (possibly on all devices). Reconnect Instagram to resume.",
+            )
+            log.warning("Instagram invalidated the session (LoginRequired) -- logged out and paused")
+            await asyncio.to_thread(
+                notify.send_push,
+                "Instagram disconnected",
+                "Instagram logged this session out. Open the app and reconnect Instagram to resume.",
             )
             return
         except Exception as e:
