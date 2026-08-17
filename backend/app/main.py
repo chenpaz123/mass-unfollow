@@ -3,7 +3,7 @@ import csv
 import io
 import logging
 import time
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -425,7 +425,7 @@ def export_csv():
                 f"https://www.instagram.com/{a['username']}/",
             ]
         )
-    filename = f"mass-unfollow-export-{date.today().isoformat()}.csv"
+    filename = f"mass-unfollow-export-{config.local_today().isoformat()}.csv"
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",

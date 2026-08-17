@@ -1,5 +1,7 @@
 import os
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 AVATAR_DIR = DATA_DIR / "avatars"
@@ -10,6 +12,18 @@ VAPID_PRIVATE_KEY_PATH = DATA_DIR / "vapid_private_key.pem"
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
+
+# Containers default to UTC regardless of the host's own timezone, so
+# "today" for the daily unfollow cap would otherwise reset at UTC midnight
+# -- hours off from the account owner's actual midnight. Set this to your
+# IANA timezone (e.g. "Asia/Jerusalem") in .env to align the reset with
+# when your day actually ends.
+APP_TIMEZONE = ZoneInfo(os.environ.get("APP_TIMEZONE", "UTC"))
+
+
+def local_today() -> date:
+    return datetime.now(APP_TIMEZONE).date()
+
 
 DEFAULT_DAILY_CAP = int(os.environ.get("DEFAULT_DAILY_CAP", "150"))
 DEFAULT_MIN_DELAY_SEC = int(os.environ.get("DEFAULT_MIN_DELAY_SEC", "45"))

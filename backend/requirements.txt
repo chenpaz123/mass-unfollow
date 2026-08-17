@@ -7,3 +7,4 @@ requests>=2.34.2,<3
 python-multipart==0.0.9
 Pillow>=8.1.1
 pywebpush==2.4.0
+tzdata==2024.2

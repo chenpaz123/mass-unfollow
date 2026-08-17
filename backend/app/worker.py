@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import random
-from datetime import date
 
 from instagrapi.exceptions import (
     ClientThrottledError,
@@ -12,7 +11,7 @@ from instagrapi.exceptions import (
     SentryBlock,
 )
 
-from . import db, ig_client, notify
+from . import config, db, ig_client, notify
 
 log = logging.getLogger("mass-unfollow.worker")
 
@@ -40,7 +39,7 @@ async def worker_loop():
 
 async def _tick():
     state = db.get_worker_state()
-    today = date.today().isoformat()
+    today = config.local_today().isoformat()
     if state["day_marker"] != today:
         db.reset_daily_counter(today)
         state = db.get_worker_state()
