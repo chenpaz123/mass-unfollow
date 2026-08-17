@@ -253,6 +253,11 @@ label input { margin-top: 6px; width: 100%; }
 .worker-status { margin-top: 16px; font-size: 0.85rem; color: var(--muted); line-height: 1.6; }
 .worker-buttons { display: flex; gap: 10px; margin-top: 14px; }
 
+.stuck-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.stuck-list-item { display: flex; justify-content: space-between; gap: 12px; font-size: 0.85rem; }
+.stuck-list-item a { color: inherit; font-weight: 600; }
+.stuck-list-item .error { text-align: right; flex-shrink: 0; max-width: 55%; }
+
 /* Toast */
 #toast {
   position: fixed;

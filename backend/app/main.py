@@ -557,6 +557,11 @@ def worker_retry_stuck():
     return {"ok": True}
 
 
+@app.get("/api/worker/stuck-accounts", dependencies=[Depends(require_auth)])
+def worker_stuck_accounts():
+    return db.get_stuck_accounts()
+
+
 # ---------------------------------------------------------------------------
 # Push notifications (currently just: the unfollow worker auto-pausing
 # because Instagram signaled a rate limit — see worker.py)

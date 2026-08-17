@@ -106,6 +106,8 @@ def init_db():
             conn.execute("ALTER TABLE accounts ADD COLUMN follows_back_checked INTEGER NOT NULL DEFAULT 0")
         if "fail_count" not in existing_cols:
             conn.execute("ALTER TABLE accounts ADD COLUMN fail_count INTEGER NOT NULL DEFAULT 0")
+        if "last_fail_error" not in existing_cols:
+            conn.execute("ALTER TABLE accounts ADD COLUMN last_fail_error TEXT DEFAULT ''")
 
         existing_sync_cols = {r["name"] for r in conn.execute("PRAGMA table_info(sync_state)")}
         if "resume_cursor" not in existing_sync_cols:
@@ -242,9 +244,12 @@ def undo_last_decision() -> str | None:
 MAX_ACCOUNT_FAIL_COUNT = 3
 
 
-def bump_account_fail_count(user_id: str):
+def bump_account_fail_count(user_id: str, error: str = ""):
     with db_lock() as conn:
-        conn.execute("UPDATE accounts SET fail_count = fail_count + 1 WHERE user_id = ?", (user_id,))
+        conn.execute(
+            "UPDATE accounts SET fail_count = fail_count + 1, last_fail_error = ? WHERE user_id = ?",
+            (error, user_id),
+        )
         conn.commit()
 
 
@@ -256,6 +261,20 @@ def retry_stuck_accounts():
             "UPDATE accounts SET fail_count = 0 WHERE decision = 'remove' AND unfollowed_at IS NULL"
         )
         conn.commit()
+
+
+def get_stuck_accounts() -> list[dict]:
+    """Accounts the worker gave up retrying (see MAX_ACCOUNT_FAIL_COUNT),
+    with the error from their last attempt, so a human can go look at them
+    on Instagram directly."""
+    with db_lock() as conn:
+        rows = conn.execute(
+            "SELECT user_id, username, full_name, profile_pic_url, fail_count, last_fail_error "
+            "FROM accounts WHERE decision = 'remove' AND unfollowed_at IS NULL AND fail_count >= ? "
+            "ORDER BY username COLLATE NOCASE",
+            (MAX_ACCOUNT_FAIL_COUNT,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def get_stats() -> dict:

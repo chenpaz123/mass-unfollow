@@ -89,7 +89,7 @@ async def _tick():
             )
             return
         except Exception as e:
-            db.bump_account_fail_count(target["user_id"])
+            db.bump_account_fail_count(target["user_id"], error=str(e))
             db.bump_worker_progress(today, state["unfollowed_today"], last_error=str(e))
             log.warning("Unfollow failed for %s: %s", target["username"], e)
 

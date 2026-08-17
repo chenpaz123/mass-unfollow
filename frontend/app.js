@@ -714,6 +714,22 @@ async function refreshReview() {
   document.getElementById("btn-worker-stop").classList.toggle("hidden", !wstate.enabled);
   document.getElementById("btn-retry-stuck").classList.toggle("hidden", wstate.stuck === 0);
 
+  const stuckListEl = document.getElementById("stuck-list");
+  if (wstate.stuck > 0) {
+    const stuckAccounts = await api("/api/worker/stuck-accounts");
+    stuckListEl.innerHTML = stuckAccounts
+      .map(
+        (a) => `
+          <div class="stuck-list-item">
+            <a href="https://instagram.com/${encodeURIComponent(a.username)}" target="_blank" rel="noopener">@${escapeHtml(a.username)}</a>
+            <span class="error">${escapeHtml(a.last_fail_error || "Unknown error")}</span>
+          </div>`
+      )
+      .join("");
+  } else {
+    stuckListEl.innerHTML = "";
+  }
+
   const sync = await api("/api/sync/status");
   const lastSyncedEl = document.getElementById("last-synced");
   lastSyncedEl.textContent = sync.last_synced_at
