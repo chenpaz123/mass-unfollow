@@ -59,7 +59,16 @@ body.has-tabbar { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
 #app {
   min-height: 100%;
   display: flex;
+  /* Plain `center` is "unsafe" alignment: when a screen's content is
+     taller than the viewport, the overflow becomes genuinely
+     unreachable by scrolling (not just visually tight) rather than
+     just centering within whatever room exists. `safe center` falls
+     back to start-alignment once content overflows, so the full page
+     stays scrollable. Redeclared (not replaced) for browsers that
+     don't understand the `safe` keyword yet -- an unsupported value
+     is dropped, leaving the plain `center` above as the fallback. */
   align-items: center;
+  align-items: safe center;
   justify-content: center;
   padding: 24px;
 }
