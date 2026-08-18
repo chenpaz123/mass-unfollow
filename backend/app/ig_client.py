@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 
 import requests
 from instagrapi import Client
@@ -14,7 +15,7 @@ from instagrapi.exceptions import (
 )
 from requests.adapters import HTTPAdapter
 
-from . import config, notify
+from . import config, db, notify
 
 log = logging.getLogger("mass-unfollow.ig")
 
@@ -350,10 +351,12 @@ async def health_check_loop():
         await asyncio.sleep(HEALTH_CHECK_INTERVAL_SEC)
         if not is_authenticated():
             continue
+        ok = True
         async with ig_call_lock:
             try:
                 await asyncio.to_thread(get_own_following_count)
             except LoginRequired:
+                ok = False
                 log.warning("Health check: Instagram invalidated the session")
                 logout()
                 await asyncio.to_thread(
@@ -365,7 +368,10 @@ async def health_check_loop():
                 # Anything else (network blip, a transient hiccup) isn't
                 # conclusive the session itself is dead -- don't log out
                 # over it, just note it and try again next interval.
+                ok = False
                 log.warning("Health check call failed (non-fatal): %s", e)
+        db.set_setting("ig_health_last_checked_at", str(time.time()))
+        db.set_setting("ig_health_last_ok", "1" if ok else "0")
 
 
 def get_own_following_count() -> int:
