@@ -343,18 +343,6 @@ label input { margin-top: 6px; width: 100%; }
 .history-actions button.primary { background: var(--accent); color: white; border: none; }
 
 /* Settings */
-.health-dot {
-  display: inline-block;
-  width: 9px; height: 9px;
-  border-radius: 50%;
-  margin-right: 6px;
-  background: var(--muted);
-  vertical-align: middle;
-}
-.health-dot.ok { background: var(--success); }
-.health-dot.bad { background: var(--danger); }
-.hint-inline { font-size: 0.78rem; margin-top: 2px; }
-
 .theme-toggle { display: flex; gap: 8px; margin-top: 12px; }
 .theme-btn {
   flex: 1; background: var(--panel-2); color: var(--muted);

@@ -955,36 +955,12 @@ document.getElementById("history-list").addEventListener("click", async (e) => {
 // Settings
 // ---------------------------------------------------------------------------
 
-// Finer-grained than timeAgo() (which only distinguishes today/days/months
-// — too coarse for a check that runs every 15 minutes).
-function formatRecentTimeAgo(unixSeconds) {
-  const seconds = Math.max(0, Date.now() / 1000 - unixSeconds);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return timeAgo(unixSeconds);
-}
-
 async function loadSettingsScreen() {
   try {
     const ig = await api("/api/ig/status");
     document.getElementById("settings-ig-status").textContent = ig.authenticated
       ? `Connected as @${ig.username}`
       : "Not connected";
-
-    const dot = document.getElementById("settings-ig-dot");
-    const checkedEl = document.getElementById("settings-ig-health-checked");
-    dot.classList.remove("ok", "bad");
-    if (ig.authenticated && ig.health_last_checked_at) {
-      dot.classList.remove("hidden");
-      dot.classList.add(ig.health_last_ok ? "ok" : "bad");
-      checkedEl.textContent = `Last checked ${formatRecentTimeAgo(ig.health_last_checked_at)}`;
-    } else {
-      dot.classList.add("hidden");
-      checkedEl.textContent = ig.authenticated ? "Not checked yet — first check runs within 15 minutes." : "";
-    }
   } catch (err) {
     showToast(err.message);
   }

@@ -213,9 +213,6 @@ def ig_status():
     snap = ig_client.auth_state.snapshot()
     snap["authenticated"] = ig_client.is_authenticated()
     snap["username"] = ig_client.get_connected_username() if snap["authenticated"] else None
-    last_checked = db.get_setting("ig_health_last_checked_at")
-    snap["health_last_checked_at"] = float(last_checked) if last_checked else None
-    snap["health_last_ok"] = db.get_setting("ig_health_last_ok") == "1" if last_checked else None
     return snap
 
 
