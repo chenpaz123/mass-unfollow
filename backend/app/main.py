@@ -636,4 +636,24 @@ def push_unsubscribe(body: PushUnsubscribeBody):
 # Frontend
 # ---------------------------------------------------------------------------
 
-app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+
+class _NoCacheStaticFiles(StaticFiles):
+    """Starlette's StaticFiles sends no Cache-Control header at all, which
+    leaves Cloudflare (sitting in front of this app) free to apply its own
+    default edge-caching TTL for static-looking extensions like .js/.css --
+    completely independent of whether the origin has already been
+    redeployed. That's what caused a stale app.js to keep being served for
+    a while even after the container itself was confirmed running the
+    latest commit. `no-cache` still lets Cloudflare/the browser keep a
+    local copy, but forces a conditional revalidation (If-None-Match) on
+    every request, so a changed file is caught on the very next load
+    instead of after some arbitrary CDN TTL expires.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/", _NoCacheStaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
