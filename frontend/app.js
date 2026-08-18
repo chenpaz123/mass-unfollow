@@ -67,7 +67,34 @@ function showToast(message, isError = true) {
 // Boot sequence
 // ---------------------------------------------------------------------------
 
+// Fire-and-forget: checks once per page load whether this instance is
+// running the latest commit pushed to GitHub, separate from the live
+// version-stream check below (which only catches drift within an already-
+// open tab, not a redeploy that simply never happened). Never awaited by
+// boot() -- a slow or failed GitHub check must not delay or block the app
+// from loading.
+async function checkStaleDeploy() {
+  try {
+    const result = await api("/api/version/latest");
+    const liveUpdateBannerShowing = !document.getElementById("update-banner").classList.contains("hidden");
+    // Skip if the live update banner is already showing -- that one already
+    // tells the user something changed, and its Reload button will pull in
+    // whatever HTML/JS is actually being served now.
+    if (!result.up_to_date && !liveUpdateBannerShowing) {
+      document.getElementById("stale-deploy-banner").classList.remove("hidden");
+    }
+  } catch (_) {
+    // Best-effort only -- GitHub unreachable, rate-limited, etc. is not
+    // worth surfacing to the user.
+  }
+}
+
+document.getElementById("btn-stale-deploy-dismiss").addEventListener("click", () => {
+  document.getElementById("stale-deploy-banner").classList.add("hidden");
+});
+
 async function boot() {
+  checkStaleDeploy();
   const session = await api("/api/session");
   if (!session.authenticated) {
     showScreen("screen-app-login");

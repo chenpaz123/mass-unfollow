@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import requests
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -94,6 +95,43 @@ def api_version():
     # Intentionally not behind require_auth: the page needs to check this even
     # while sitting on the login screen, and a build timestamp isn't sensitive.
     return {"version": config.APP_VERSION}
+
+
+_latest_commit_cache = {"sha": None, "checked_at": 0.0}
+# The version-stream mechanism above only catches drift within a single
+# running process (this server vs. a newer one that replaced it) -- it can
+# never notice a redeploy that was simply forgotten, since nothing on this
+# process would have changed. This checks GitHub directly instead. Cached
+# rather than hit on every page load: three instances all polling GitHub
+# unauthenticated share a modest per-IP rate limit.
+LATEST_COMMIT_CACHE_TTL_SEC = 300
+
+
+@app.get("/api/version/latest")
+def api_version_latest():
+    # Also not behind require_auth, same reasoning as /api/version -- this
+    # is public repo metadata, not anything sensitive to this account.
+    now = time.time()
+    if now - _latest_commit_cache["checked_at"] > LATEST_COMMIT_CACHE_TTL_SEC:
+        try:
+            resp = requests.get(
+                "https://api.github.com/repos/chenpaz123/mass-unfollow/commits/main",
+                headers={"Accept": "application/vnd.github+json"},
+                timeout=5,
+            )
+            resp.raise_for_status()
+            _latest_commit_cache["sha"] = resp.json()["sha"]
+        except Exception as e:
+            log.warning("Couldn't check latest commit on GitHub: %s", e)
+            # Keep whatever was last cached (possibly still None) rather than
+            # raising -- this check should never block the app from loading.
+        _latest_commit_cache["checked_at"] = now
+
+    latest_sha = _latest_commit_cache["sha"]
+    # config.APP_VERSION is "dev" outside a real Docker build (no VERSION
+    # file), where there's nothing meaningful to compare against.
+    up_to_date = latest_sha is None or config.APP_VERSION == "dev" or latest_sha.startswith(config.APP_VERSION)
+    return {"up_to_date": up_to_date, "latest_version": latest_sha[:7] if latest_sha else None}
 
 
 @app.get("/api/version/stream")

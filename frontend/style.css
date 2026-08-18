@@ -379,3 +379,29 @@ label input { margin-top: 6px; width: 100%; }
   opacity: 0.8;
   padding: 4px;
 }
+
+/* Same layout as #update-banner, but low-key rather than accent-colored --
+   this one is an FYI for whoever runs the deployment, not something a
+   regular user needs to act on urgently. */
+#stale-deploy-banner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--panel-2);
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+  padding-top: calc(10px + env(safe-area-inset-top));
+  font-size: 0.85rem;
+  text-align: center;
+}
+#stale-deploy-banner #btn-stale-deploy-dismiss {
+  color: var(--muted);
+  opacity: 0.8;
+  padding: 4px;
+}
