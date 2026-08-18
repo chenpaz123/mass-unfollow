@@ -55,6 +55,7 @@ async def on_startup():
             )
 
     asyncio.create_task(worker.worker_loop())
+    asyncio.create_task(ig_client.health_check_loop())
 
 
 # ---------------------------------------------------------------------------

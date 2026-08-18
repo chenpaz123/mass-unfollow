@@ -14,7 +14,7 @@ from instagrapi.exceptions import (
 )
 from requests.adapters import HTTPAdapter
 
-from . import config
+from . import config, notify
 
 log = logging.getLogger("mass-unfollow.ig")
 
@@ -329,6 +329,43 @@ def logout():
         auth_state.error = ""
     if config.IG_SESSION_PATH.exists():
         config.IG_SESSION_PATH.unlink()
+
+
+HEALTH_CHECK_INTERVAL_SEC = 15 * 60
+
+
+async def health_check_loop():
+    """Runs for the lifetime of the app. The worker only touches Instagram
+    when it actually has something to unfollow and isn't paused or capped
+    -- while idle (empty queue, daily cap reached, manually paused) a
+    session Instagram invalidated could otherwise sit unnoticed
+    indefinitely, with the app still showing "connected" purely from
+    cached local state (see is_authenticated()). This makes one cheap real
+    call on a fixed interval regardless of what the worker is doing, so a
+    lost connection gets caught and surfaced even during long idle
+    stretches, the same way worker.py already handles it hitting
+    LoginRequired mid-unfollow.
+    """
+    while True:
+        await asyncio.sleep(HEALTH_CHECK_INTERVAL_SEC)
+        if not is_authenticated():
+            continue
+        async with ig_call_lock:
+            try:
+                await asyncio.to_thread(get_own_following_count)
+            except LoginRequired:
+                log.warning("Health check: Instagram invalidated the session")
+                logout()
+                await asyncio.to_thread(
+                    notify.send_push,
+                    "Instagram disconnected",
+                    "Instagram logged this session out. Open the app and reconnect Instagram to resume.",
+                )
+            except Exception as e:
+                # Anything else (network blip, a transient hiccup) isn't
+                # conclusive the session itself is dead -- don't log out
+                # over it, just note it and try again next interval.
+                log.warning("Health check call failed (non-fatal): %s", e)
 
 
 def get_own_following_count() -> int:
