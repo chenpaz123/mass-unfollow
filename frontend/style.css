@@ -50,7 +50,11 @@ html, body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-body.has-tabbar { padding-bottom: 76px; }
+/* Matches the tab bar's own reserved space (see #tab-bar below) --
+   a flat value here would undercount on phones with a bottom safe-area
+   inset (e.g. the iPhone home indicator), cutting off content that sits
+   just above the fixed bar. */
+body.has-tabbar { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
 
 #app {
   min-height: 100%;
