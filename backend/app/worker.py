@@ -111,9 +111,19 @@ async def _tick():
             )
             return
         except Exception as e:
-            db.bump_account_fail_count(target["user_id"], error=str(e))
+            fail_count = db.bump_account_fail_count(target["user_id"], error=str(e))
             db.bump_worker_progress(today, state["unfollowed_today"], last_error=str(e))
             log.warning("Unfollow failed for %s: %s", target["username"], e)
+            if fail_count == db.MAX_ACCOUNT_FAIL_COUNT:
+                # Fires exactly once per account, right as it crosses into
+                # "stuck" (get_next_to_unfollow stops picking it up from
+                # here) -- not on every failure before or after that point.
+                await asyncio.to_thread(
+                    notify.send_push,
+                    "Account skipped after repeated errors",
+                    f"@{target['username']} failed {db.MAX_ACCOUNT_FAIL_COUNT} times ({e}) and won't be "
+                    "retried automatically. Check the Queue tab.",
+                )
 
     delay = random.uniform(state["min_delay_sec"], state["max_delay_sec"])
     await asyncio.sleep(delay)

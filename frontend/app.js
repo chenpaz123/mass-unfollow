@@ -974,11 +974,11 @@ async function refreshPushStatus() {
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
   if (sub) {
-    statusEl.textContent = "Enabled — you'll get a notification if the unfollow worker pauses itself.";
+    statusEl.textContent = "Enabled — you'll get a notification if the unfollow worker pauses itself, or when an account gets skipped after repeated errors.";
     enableBtn.classList.add("hidden");
     disableBtn.classList.remove("hidden");
   } else {
-    statusEl.textContent = "Off — enable to get notified if the unfollow worker pauses itself (e.g. Instagram rate-limiting you).";
+    statusEl.textContent = "Off — enable to get notified if the unfollow worker pauses itself (e.g. Instagram rate-limiting you), or when an account gets skipped after repeated errors.";
     enableBtn.classList.remove("hidden");
     disableBtn.classList.add("hidden");
   }

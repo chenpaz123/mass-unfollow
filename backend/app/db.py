@@ -244,13 +244,17 @@ def undo_last_decision() -> str | None:
 MAX_ACCOUNT_FAIL_COUNT = 3
 
 
-def bump_account_fail_count(user_id: str, error: str = ""):
+def bump_account_fail_count(user_id: str, error: str = "") -> int:
+    """Returns the account's fail_count after this bump, so callers can tell
+    exactly when it crosses into "stuck" (== MAX_ACCOUNT_FAIL_COUNT) rather
+    than re-deriving that from a separate query."""
     with db_lock() as conn:
         conn.execute(
             "UPDATE accounts SET fail_count = fail_count + 1, last_fail_error = ? WHERE user_id = ?",
             (error, user_id),
         )
         conn.commit()
+        return conn.execute("SELECT fail_count FROM accounts WHERE user_id = ?", (user_id,)).fetchone()["fail_count"]
 
 
 def retry_stuck_accounts():
