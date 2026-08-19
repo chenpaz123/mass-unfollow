@@ -41,20 +41,37 @@ def verify_cookie(value: str | None) -> bool:
         return False
 
 
+LEGACY_PBKDF2_ITERATIONS = 200_000
+
+
 def _hash_password(password: str) -> str:
     salt = os.urandom(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PBKDF2_ITERATIONS)
-    return f"{salt.hex()}:{dk.hex()}"
+    return f"{PBKDF2_ITERATIONS}:{salt.hex()}:{dk.hex()}"
 
 
 def _verify_hash(password: str, stored: str) -> bool:
+    # Hashes written before the iteration count was embedded in the stored
+    # string are "salt:hash" and were always produced with
+    # LEGACY_PBKDF2_ITERATIONS -- verify those against that fixed count
+    # rather than whatever PBKDF2_ITERATIONS happens to be now, so bumping
+    # PBKDF2_ITERATIONS doesn't lock out anyone who hasn't changed their
+    # password since.
+    parts = stored.split(":")
     try:
-        salt_hex, dk_hex = stored.split(":")
-        salt = bytes.fromhex(salt_hex)
-        expected = bytes.fromhex(dk_hex)
+        if len(parts) == 3:
+            iterations = int(parts[0])
+            salt = bytes.fromhex(parts[1])
+            expected = bytes.fromhex(parts[2])
+        elif len(parts) == 2:
+            iterations = LEGACY_PBKDF2_ITERATIONS
+            salt = bytes.fromhex(parts[0])
+            expected = bytes.fromhex(parts[1])
+        else:
+            return False
     except ValueError:
         return False
-    actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PBKDF2_ITERATIONS)
+    actual = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
     return hmac.compare_digest(actual, expected)
 
 

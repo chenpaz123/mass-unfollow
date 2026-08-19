@@ -19,14 +19,14 @@ function showScreen(id) {
 }
 
 // Switches to one of the four persistent tabs, loading/refreshing that
-// tab's data and stopping any polling owned by the tab being left.
+// tab's data and stopping any live connection owned by the tab being left.
 function switchTab(id) {
-  stopWorkerPolling();
+  stopReviewStream();
   showScreen(id);
   if (id === "screen-swipe") initQueue();
   else if (id === "screen-review") {
     refreshReview();
-    workerPollTimer = setInterval(refreshReview, 5000);
+    startReviewStream();
   } else if (id === "screen-history") loadHistory(true);
   else if (id === "screen-settings") loadSettingsScreen();
 }
@@ -695,15 +695,11 @@ document.querySelectorAll(".tab-bar-btn").forEach((btn) => {
 // Review + unfollow worker
 // ---------------------------------------------------------------------------
 
-let workerPollTimer = null;
-
-function stopWorkerPolling() {
-  clearInterval(workerPollTimer);
-  workerPollTimer = null;
-}
-
-async function refreshReview() {
-  const stats = await api("/api/stats");
+// Renders the Review tab from one combined snapshot -- shared by the
+// initial/action-triggered fetch (refreshReview) and each live update
+// pushed over the SSE connection (startReviewStream), so the two paths
+// can never draw the screen differently.
+function renderReview({ stats, worker: wstate, stuck_accounts: stuckAccounts, sync }) {
   const grid = document.getElementById("stats-grid");
   const toUnfollow = stats.remove - stats.unfollowed;
   grid.innerHTML = `
@@ -714,7 +710,6 @@ async function refreshReview() {
     <div><span class="n">${toUnfollow}</span><span class="label">Queued to unfollow</span></div>
   `;
 
-  const wstate = await api("/api/worker/status");
   document.getElementById("cfg-daily-cap").value = wstate.daily_cap;
   document.getElementById("cfg-min-delay").value = wstate.min_delay_sec;
   document.getElementById("cfg-max-delay").value = wstate.max_delay_sec;
@@ -742,30 +737,46 @@ async function refreshReview() {
   document.getElementById("btn-retry-stuck").classList.toggle("hidden", wstate.stuck === 0);
 
   const stuckListEl = document.getElementById("stuck-list");
-  if (wstate.stuck > 0) {
-    const stuckAccounts = await api("/api/worker/stuck-accounts");
-    stuckListEl.innerHTML = stuckAccounts
-      .map(
-        (a) => `
-          <div class="stuck-list-item">
-            <a href="https://instagram.com/${encodeURIComponent(a.username)}" target="_blank" rel="noopener">@${escapeHtml(a.username)}</a>
-            <span class="error">${escapeHtml(a.last_fail_error || "Unknown error")}</span>
-          </div>`
-      )
-      .join("");
-  } else {
-    stuckListEl.innerHTML = "";
-  }
+  stuckListEl.innerHTML = stuckAccounts
+    .map(
+      (a) => `
+        <div class="stuck-list-item">
+          <a href="https://instagram.com/${encodeURIComponent(a.username)}" target="_blank" rel="noopener">@${escapeHtml(a.username)}</a>
+          <span class="error">${escapeHtml(a.last_fail_error || "Unknown error")}</span>
+        </div>`
+    )
+    .join("");
 
-  const sync = await api("/api/sync/status");
   const lastSyncedEl = document.getElementById("last-synced");
   lastSyncedEl.textContent = sync.last_synced_at
     ? `Last synced ${new Date(sync.last_synced_at * 1000).toLocaleString()}`
     : "";
 }
 
+async function refreshReview() {
+  const [stats, worker, sync] = await Promise.all([api("/api/stats"), api("/api/worker/status"), api("/api/sync/status")]);
+  const stuck_accounts = worker.stuck > 0 ? await api("/api/worker/stuck-accounts") : [];
+  renderReview({ stats, worker, stuck_accounts, sync });
+}
+
+let reviewSource = null;
+
+function stopReviewStream() {
+  if (reviewSource) reviewSource.close();
+  reviewSource = null;
+}
+
+function startReviewStream() {
+  stopReviewStream();
+  reviewSource = new EventSource("/api/review/stream");
+  reviewSource.onmessage = (ev) => renderReview(JSON.parse(ev.data));
+  // onerror fires on every drop, including ones EventSource will silently
+  // auto-reconnect from (network blips, the tab backgrounding briefly) --
+  // nothing to do here, same reasoning as the version stream below.
+}
+
 document.getElementById("btn-resync").addEventListener("click", () => {
-  stopWorkerPolling();
+  stopReviewStream();
   startSync();
 });
 

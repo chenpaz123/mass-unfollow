@@ -9,21 +9,28 @@ services:
       - .env
     volumes:
       - ./data:/data
-    ports:
-      # Published on the host, same pattern as this deployment's other
-      # cloudflared-routed services (n8n, portainer, jenkins): reachable via
-      # the docker0 bridge gateway at 172.17.0.1:8000, and also on the LAN.
-      # Access control comes from Cloudflare Access + APP_PASSWORD, not from
-      # network isolation — make sure both are set before exposing this.
-      - "8000:8000"
+    networks:
+      - cloudflared_net
+    # No `ports:` on purpose. Docker's port publishing inserts DNAT rules in
+    # the PREROUTING chain, ahead of UFW/iptables' INPUT filtering -- a
+    # published port on 0.0.0.0 is reachable from the public internet via
+    # the host's public IP even with UFW blocking it, and binding to
+    # 127.0.0.1 instead would stop that but also stop cloudflared (itself a
+    # container) from reaching this over the docker0 bridge gateway. Instead
+    # this container joins the same Docker network as cloudflared and is
+    # reached by its service name (`mass-unfollow`) over that private
+    # network -- never touches the host's network stack at all, so neither
+    # the LAN nor the public internet can reach it directly regardless of
+    # firewall rules. See the README's Cloudflare route step for the
+    # matching tunnel config.
 
   # Additional fully independent instances for someone else to connect their
   # own Instagram account to. Same image/code, but its own container, own
-  # data volume, own .env (own APP_PASSWORD/SECRET_KEY), own port — nothing
-  # here is shared with the primary instance above or with each other. This
-  # app has no multi-user support, so separate deployments are the safe way
-  # to let another person use it without their session/data mixing with
-  # anyone else's.
+  # data volume, own .env (own APP_PASSWORD/SECRET_KEY) — nothing here is
+  # shared with the primary instance above or with each other. This app has
+  # no multi-user support, so separate deployments are the safe way to let
+  # another person use it without their session/data mixing with anyone
+  # else's.
   mass-unfollow-martin:
     build:
       context: .
@@ -34,8 +41,8 @@ services:
       - .env.martin
     volumes:
       - ./data-martin:/data
-    ports:
-      - "8001:8000"
+    networks:
+      - cloudflared_net
 
   mass-unfollow-tal:
     build:
@@ -47,5 +54,14 @@ services:
       - .env.tal
     volumes:
       - ./data-tal:/data
-    ports:
-      - "8002:8000"
+    networks:
+      - cloudflared_net
+
+networks:
+  # Must be the same Docker network your cloudflared container is already
+  # on (check with `docker inspect <cloudflared-container> | grep -A5
+  # Networks`, or your cloudflared compose file) -- rename this to match if
+  # it's called something else. `external: true` means this file only joins
+  # it, it doesn't try to create/own it.
+  cloudflared_net:
+    external: true
