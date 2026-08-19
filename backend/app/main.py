@@ -4,14 +4,16 @@ import io
 import json
 import logging
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
 import requests
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from . import config, db, ig_client, notify, security, worker
 
@@ -233,6 +235,36 @@ def change_app_password(body: ChangeAppPasswordBody):
 def reset_data():
     db.reset_all_accounts()
     return {"ok": True}
+
+
+@app.get("/api/settings/backup", dependencies=[Depends(require_auth)])
+def download_backup():
+    """SQLite backup download, for an external automation tool to pull on a
+    schedule using the same app-password-gated auth as everything else --
+    this holds account/decision/worker-config data (not the Instagram
+    session itself, that's a separate file), but does include the hashed
+    app password, so treat wherever this gets saved to as sensitive.
+
+    Can't just FileResponse(config.DB_PATH) directly -- the connection runs
+    in WAL mode (see db.py), so recent writes can still be sitting in the
+    separate app.db-wal file rather than in app.db itself, and a raw copy of
+    just the main file is not guaranteed to even open as a valid database.
+    VACUUM INTO produces a real point-in-time consistent, self-contained
+    snapshot regardless of WAL state; written to a fresh temp path since it
+    errors if the target already exists, and cleaned up once the response
+    has actually been sent.
+    """
+    if not config.DB_PATH.exists():
+        raise HTTPException(status_code=404, detail="No database file yet")
+    tmp_path = config.DATA_DIR / f".backup-{uuid.uuid4().hex}.db"
+    with db.db_lock() as conn:
+        conn.execute("VACUUM INTO ?", (str(tmp_path),))
+    return FileResponse(
+        tmp_path,
+        media_type="application/octet-stream",
+        filename=f"mass-unfollow-{config.local_today().isoformat()}.db",
+        background=BackgroundTask(lambda: tmp_path.unlink(missing_ok=True)),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,15 @@ CAP_REACHED_POLL_SEC = 60
 # risks escalating a temporary block into something worse.
 RATE_LIMIT_EXCEPTIONS = (PleaseWaitFewMinutes, RateLimitError, FeedbackRequired, SentryBlock, ClientThrottledError)
 
+# Consecutive (not total) generic failures -- e.g. instagrapi's parsing
+# breaking against a new Instagram app version, the kind of thing that will
+# fail identically forever until someone bumps the pin (see the README's
+# troubleshooting section), as opposed to per-account issues that
+# bump_account_fail_count already isolates. A module-level counter is fine
+# since worker_loop is a single long-lived task within one process.
+CONSECUTIVE_ERROR_LIMIT = 5
+_consecutive_generic_errors = 0
+
 
 async def worker_loop():
     """Runs for the lifetime of the app. Processes the 'remove' queue at a
@@ -62,12 +71,15 @@ async def _tick():
         await asyncio.sleep(IDLE_POLL_SEC)
         return
 
+    global _consecutive_generic_errors
+
     async with ig_client.ig_call_lock:
         try:
             await asyncio.to_thread(ig_client.unfollow, target["user_id"])
             db.mark_unfollowed(target["user_id"])
             db.bump_worker_progress(today, state["unfollowed_today"] + 1)
             log.info("Unfollowed %s (%s/%s today)", target["username"], state["unfollowed_today"] + 1, state["daily_cap"])
+            _consecutive_generic_errors = 0
         except RATE_LIMIT_EXCEPTIONS as e:
             # Instagram itself is telling us to stop -- pause instead of just
             # retrying the same account at the normal pace, which would keep
@@ -124,6 +136,32 @@ async def _tick():
                     f"@{target['username']} failed {db.MAX_ACCOUNT_FAIL_COUNT} times ({e}) and won't be "
                     "retried automatically. Check the Queue tab.",
                 )
+
+            _consecutive_generic_errors += 1
+            if _consecutive_generic_errors >= CONSECUTIVE_ERROR_LIMIT:
+                # Different accounts failing back-to-back with generic (not
+                # rate-limit, not LoginRequired) errors points at something
+                # systemic -- most likely instagrapi falling behind
+                # Instagram's current app version (see README) -- rather
+                # than anything specific to those accounts. Auto-pause
+                # instead of grinding through the rest of the queue the
+                # same way.
+                _consecutive_generic_errors = 0
+                db.update_worker_config(enabled=False)
+                db.bump_worker_progress(
+                    today,
+                    state["unfollowed_today"],
+                    last_error=f"Paused automatically after {CONSECUTIVE_ERROR_LIMIT} failures in a row ({e}). "
+                    "instagrapi may need an update -- see the README's troubleshooting section.",
+                )
+                log.warning("%s consecutive generic errors, auto-pausing", CONSECUTIVE_ERROR_LIMIT)
+                await asyncio.to_thread(
+                    notify.send_push,
+                    "Worker failing repeatedly",
+                    f"{CONSECUTIVE_ERROR_LIMIT} unfollows in a row failed with the same kind of error. "
+                    "instagrapi may need an update. Check the Queue tab.",
+                )
+                return
 
     delay = random.uniform(state["min_delay_sec"], state["max_delay_sec"])
     await asyncio.sleep(delay)
