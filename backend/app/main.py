@@ -24,9 +24,41 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 _sync_task: asyncio.Task | None = None
 
 
+def _client_key(request: Request) -> str:
+    # cloudflared connects to this container directly (not through a
+    # reverse proxy that rewrites the socket peer), so it sets
+    # Cf-Connecting-IP with the real visitor IP; request.client.host would
+    # otherwise be cloudflared's own address for every tunnel request,
+    # bucketing every visitor together. This header is only used to key
+    # rate-limit counters, never for auth decisions, so a spoofed value from
+    # someone hitting the origin directly just costs them their own bucket.
+    return request.headers.get("cf-connecting-ip") or (request.client.host if request.client else "unknown")
+
+
+def _is_https(request: Request) -> bool:
+    return request.headers.get("x-forwarded-proto", request.url.scheme) == "https"
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
 @app.on_event("startup")
 async def on_startup():
     global _sync_task
+
+    if not config.SECRET_KEY or config.SECRET_KEY in security.PLACEHOLDER_VALUES:
+        raise RuntimeError(
+            "SECRET_KEY is missing or still the placeholder from .env.example. "
+            'Generate one with: python3 -c "import secrets; print(secrets.token_hex(32))" '
+            "and set it in .env before running the app."
+        )
+
     db.init_db()
     try:
         if ig_client.try_restore_session():
@@ -72,15 +104,28 @@ class LoginBody(BaseModel):
 
 
 @app.post("/api/login")
-def api_login(body: LoginBody, response: Response):
+def api_login(body: LoginBody, request: Request, response: Response):
+    client_key = _client_key(request)
+    retry_after = security.seconds_until_unlocked(client_key)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed attempts. Try again in {retry_after}s.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
     if not security.check_password(body.password):
+        security.record_failed_login(client_key)
         raise HTTPException(status_code=401, detail="Wrong password")
+
+    security.record_successful_login(client_key)
     response.set_cookie(
         security.COOKIE_NAME,
         security.make_cookie_value(),
         max_age=security.MAX_AGE,
         httponly=True,
         samesite="lax",
+        secure=_is_https(request),
     )
     return {"ok": True}
 

@@ -82,6 +82,15 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+The app refuses to start if `SECRET_KEY` is missing or still the placeholder
+from `.env.example` (check logs with `docker compose logs` if it won't come
+up) — that value signs the login cookie, so a known/default one would let
+anyone forge a valid session. `APP_PASSWORD` left as the placeholder is
+treated the same as leaving it blank (falls back to Cloudflare Access only)
+rather than silently becoming a guessable real password. `/api/login` also
+locks out an IP for up to 15 minutes after 5 failed attempts, to slow down
+brute-forcing the app password.
+
 This publishes the app on port `8000` on the server itself (same pattern this
 deployment already uses for n8n/portainer/jenkins) — reachable at
 `http://<server-lan-ip>:8000` on your home network, and at
