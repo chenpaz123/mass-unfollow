@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import io
+import json
 import logging
 import time
 from datetime import datetime
@@ -625,13 +626,17 @@ def worker_config(body: WorkerConfigBody):
     return db.get_worker_state()
 
 
-@app.get("/api/worker/status", dependencies=[Depends(require_auth)])
-def worker_status():
+def _worker_status_dict() -> dict:
     state = db.get_worker_state()
     stats_ = db.get_stats()
     state["remaining_to_unfollow"] = stats_["remove"] - stats_["unfollowed"]
     state["stuck"] = stats_["stuck"]
     return state
+
+
+@app.get("/api/worker/status", dependencies=[Depends(require_auth)])
+def worker_status():
+    return _worker_status_dict()
 
 
 @app.post("/api/worker/retry-stuck", dependencies=[Depends(require_auth)])
@@ -643,6 +648,54 @@ def worker_retry_stuck():
 @app.get("/api/worker/stuck-accounts", dependencies=[Depends(require_auth)])
 def worker_stuck_accounts():
     return db.get_stuck_accounts()
+
+
+def _review_snapshot() -> dict:
+    """Everything the Review tab needs to redraw itself, bundled into one
+    payload -- the same set of endpoints refreshReview() used to call
+    separately on each 5s poll tick (stats, worker status, stuck-account
+    detail, last-sync time)."""
+    worker_state = _worker_status_dict()
+    return {
+        "stats": db.get_stats(),
+        "worker": worker_state,
+        "stuck_accounts": db.get_stuck_accounts() if worker_state["stuck"] > 0 else [],
+        "sync": db.get_sync_state(),
+    }
+
+
+REVIEW_STREAM_POLL_SEC = 3
+
+
+@app.get("/api/review/stream", dependencies=[Depends(require_auth)])
+async def api_review_stream(request: Request):
+    """Replaces the frontend's old 5s setInterval poll of /api/stats +
+    /api/worker/status with a push: the unfollow worker only ever acts on a
+    45-180s randomized delay, so most of those polls found nothing new.
+    Polls the DB server-side on the same short cadence (cheap local SQLite
+    reads) but only pushes a message when the snapshot actually changed,
+    so an idle Review tab costs periodic keep-alive comments, not repeated
+    identical payloads.
+    """
+
+    async def event_stream():
+        last_payload = None
+        while True:
+            if await request.is_disconnected():
+                break
+            payload = json.dumps(_review_snapshot())
+            if payload != last_payload:
+                yield f"data: {payload}\n\n"
+                last_payload = payload
+            else:
+                yield ": keep-alive\n\n"
+            await asyncio.sleep(REVIEW_STREAM_POLL_SEC)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ---------------------------------------------------------------------------

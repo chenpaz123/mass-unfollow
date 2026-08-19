@@ -91,18 +91,18 @@ rather than silently becoming a guessable real password. `/api/login` also
 locks out an IP for up to 15 minutes after 5 failed attempts, to slow down
 brute-forcing the app password.
 
-This publishes the app on port `8000` on the server itself (same pattern this
-deployment already uses for n8n/portainer/jenkins) — reachable at
-`http://<server-lan-ip>:8000` on your home network, and at
-`http://172.17.0.1:8000` from inside any container on the default `bridge`
-network (including `cloudflared`, going by the routes already configured for
-`n8n` and `home`). It is **not** exposed to the internet directly — only
-through the tunnel, once you add the route below — but note it's reachable
-by anything on your LAN as-is, so get `APP_PASSWORD` and Cloudflare Access set
-before leaving it running.
+This does **not** publish any port on the host — `mass-unfollow` only joins
+the `cloudflared_net` Docker network (see the comment in `docker-compose.yml`
+if your cloudflared container is on a differently-named network; edit that
+file to match). That means it isn't reachable via the server's LAN IP, the
+docker0 bridge gateway, or the public internet — only from other containers
+on that same network, i.e. cloudflared. `APP_PASSWORD` and Cloudflare Access
+are still worth having as defense in depth, but the network itself no longer
+depends on them for isolation.
 
-Check it's alive: `curl http://127.0.0.1:8000/api/session` (run on the
-server) should return `{"authenticated":false}`.
+Check it's alive from the server: `docker compose exec mass-unfollow curl
+http://127.0.0.1:8000/api/session` should return `{"authenticated":false}`
+(there's no host-published port to `curl` directly anymore).
 
 ## 2. Add the route in Cloudflare
 
@@ -111,8 +111,9 @@ routes**:
 
 1. **+ Add a published application route**.
 2. Domain: `unfollow.chenpaz.cc` (or whatever subdomain you want).
-3. Service: **Type** `HTTP`, **URL** `172.17.0.1:8000` — same pattern as your
-   `n8n.chenpaz.cc` and `home.chenpaz.cc` routes.
+3. Service: **Type** `HTTP`, **URL** `mass-unfollow:8000` — the container's
+   name and port on `cloudflared_net`, resolved via Docker's internal DNS
+   (not an IP, since there's no bridge-gateway route to it anymore).
 4. Save. No restart needed, cloudflared picks it up automatically.
 
 ## 3. Lock it down with Cloudflare Access
@@ -232,9 +233,10 @@ them.
 
 `docker-compose.yml` already defines one such service per additional person
 in this deployment (`mass-unfollow-martin`, `mass-unfollow-tal` — copy the
-pattern and pick the next free port for anyone new) that reuses the same
-image but gets its own container, data volume, `.env` file, and port. To
-bring one up (using Tal's as the example — swap in the right name/port):
+pattern for anyone new, using their name as both the service and container
+name) that reuses the same image but gets its own container, data volume,
+and `.env` file. To bring one up (using Tal's as the example — swap in the
+right name):
 
 ```bash
 cd ~/mass-unfollow
@@ -244,12 +246,11 @@ nano .env.tal   # set APP_PASSWORD (unique — not shared with any other instanc
 docker compose up -d --build mass-unfollow-tal
 ```
 
-This publishes it on port `8002` (reachable at `172.17.0.1:8002` from
-cloudflared, same pattern as the primary instance on `8000` and Martin's on
-`8001`). Then in Cloudflare:
+No port is published for it either — it joins `cloudflared_net` and is
+reachable at `mass-unfollow-tal:8000` from cloudflared. Then in Cloudflare:
 
 1. **Published application route**: domain `unfollow-tal.chenpaz.cc`,
-   service `http://172.17.0.1:8002`.
+   service `http://mass-unfollow-tal:8000`.
 2. **Zero Trust Access application** (Public DNS type) on that hostname, with
    its own policy — **Include → Emails** → that person's email only. Don't
    add them to anyone else's policy; that's a separate app now.
@@ -276,8 +277,9 @@ a while before retrying.
 Your hostname is proxied through Cloudflare, which caches static assets
 (HTML/JS/CSS) at its edge independently of your origin server — so
 `docker compose up -d --build` on the server doesn't guarantee the browser
-gets the new files. To confirm: `curl -s http://127.0.0.1:8000/ | grep -c
-"tab-bar"` on the server checks the origin directly; if that looks right but
+gets the new files. To confirm: `docker compose exec mass-unfollow curl -s
+http://127.0.0.1:8000/ | grep -c "tab-bar"` checks the origin directly; if
+that looks right but
 an **incognito** tab on the live domain still shows the old version, it's
 Cloudflare's cache, not the deploy. Fix: Cloudflare dashboard → your zone →
 **Caching → Configuration → Purge Cache → Purge Everything** (safe, just
