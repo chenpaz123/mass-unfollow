@@ -9,7 +9,7 @@ from . import config, db
 
 COOKIE_NAME = "mu_session"
 MAX_AGE = 60 * 60 * 24 * 30  # 30 days
-PBKDF2_ITERATIONS = 200_000
+PBKDF2_ITERATIONS = 600_000
 
 # Values straight out of .env.example -- if either SECRET_KEY or APP_PASSWORD
 # is still set to one of these, the operator forgot to actually generate/set
